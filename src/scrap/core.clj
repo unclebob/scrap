@@ -1015,7 +1015,8 @@
 
 (defn- parse-args
   [args]
-  (loop [opts {:verbose false
+  (loop [opts {:help false
+               :verbose false
                :json false
                :write-baseline false
                :compare nil
@@ -1023,6 +1024,9 @@
          remaining args]
     (if-let [arg (first remaining)]
       (cond
+        (= arg "--help")
+        (recur (assoc opts :help true) (rest remaining))
+
         (= arg "--verbose")
         (recur (assoc opts :verbose true) (rest remaining))
 
@@ -1038,6 +1042,18 @@
         :else
         (recur (update opts :paths conj arg) (rest remaining)))
       opts)))
+
+(defn usage
+  []
+  (str
+    "Usage: clj -M:scrap [path ...] [options]\n\n"
+    "If no path is provided, SCRAP defaults to spec.\n\n"
+    "Options:\n"
+    "  --help            Print this usage text.\n"
+    "  --verbose         Show full per-file, block, and example metrics.\n"
+    "  --json            Emit the report as JSON.\n"
+    "  --write-baseline  Write a baseline report under target/scrap/.\n"
+    "  --compare PATH    Compare the current report to a saved baseline JSON file.\n"))
 
 (defn- format-smells [smells]
   (if (seq smells)
@@ -1234,23 +1250,34 @@
      :paths (vec paths)
      :reports reports}))
 
+(defn run-cli
+  [args]
+  (let [{:keys [help paths verbose json write-baseline compare]} (parse-args args)]
+    (if help
+      {:exit-code 0
+       :stdout (usage)}
+      (let [files (collect-spec-files paths)
+            reports (mapv analyze-file files)
+            reports (if compare
+                      (compare-reports (read-json-file compare) reports)
+                      reports)
+            baseline-doc (baseline-document paths reports)
+            baseline-path (baseline-output-path paths)
+            has-errors? (some #(or (seq (:structure-errors %)) (:parse-error %)) reports)
+            stdout (str
+                     (if json
+                       (render-json paths reports)
+                       (render-report reports verbose))
+                     (when write-baseline
+                       (str "\nBaseline written: " baseline-path)))]
+        (when write-baseline
+          (write-baseline! baseline-path baseline-doc))
+        {:exit-code (if has-errors? 1 0)
+         :stdout stdout}))))
+
 (defn -main
   [& args]
-  (let [{:keys [paths verbose json write-baseline compare]} (parse-args args)
-        files (collect-spec-files paths)
-        reports (mapv analyze-file files)
-        reports (if compare
-                  (compare-reports (read-json-file compare) reports)
-                  reports)
-        baseline-doc (baseline-document paths reports)
-        baseline-path (baseline-output-path paths)
-        has-errors? (some #(or (seq (:structure-errors %)) (:parse-error %)) reports)]
-    (when write-baseline
-      (write-baseline! baseline-path baseline-doc))
-    (println (if json
-               (render-json paths reports)
-               (render-report reports verbose)))
-    (when write-baseline
-      (println (str "Baseline written: " baseline-path)))
+  (let [{:keys [exit-code stdout]} (run-cli args)]
+    (println stdout)
     (shutdown-agents)
-    (System/exit (if has-errors? 1 0))))
+    (System/exit exit-code)))

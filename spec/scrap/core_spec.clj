@@ -356,3 +356,17 @@
       (should-contain "comparison:" output)
       (should-contain "verdict: worse" output)
       (should-contain "Refactor appears negative" output)))
+
+(describe "cli"
+  (it "prints usage for --help on stdout"
+    (let [{:keys [exit-code stdout]} (scrap/run-cli ["--help"])]
+      (should= 0 exit-code)
+      (should-contain "Usage: clj -M:scrap" stdout)
+      (should-contain "--help" stdout)
+      (should-contain "--compare PATH" stdout)))
+
+  (it "exposes the same usage text from the usage helper"
+    (let [stdout (scrap/usage)]
+      (should-contain "If no path is provided, SCRAP defaults to spec." stdout)
+      (should-contain "--write-baseline" stdout)
+      (should-contain "--json" stdout))))
