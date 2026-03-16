@@ -43,5 +43,5 @@
       branch-penalty)))
 
 ;; clj-mutate-manifest-begin
-;; {:version 1, :tested-at "2026-03-16T08:48:01.780357-05:00", :module-hash "1095064886", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "740668023"} {:id "defn/saturating-complexity-score", :kind "defn", :line 5, :end-line 13, :hash "623672219"} {:id "defn/api-contract-example?", :kind "defn", :line 15, :end-line 27, :hash "-268962645"} {:id "defn/scored-setup-depth", :kind "defn", :line 29, :end-line 33, :hash "-217133315"} {:id "defn/scored-branch-penalty", :kind "defn", :line 35, :end-line 42, :hash "-356787910"}]}
+;; {:version 1, :tested-at "2026-03-16T14:28:05.528391-05:00", :module-hash "130125209", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "-743802109"} {:id "defn/saturating-complexity-score", :kind "defn", :line 5, :end-line 14, :hash "-280887590"} {:id "defn/api-contract-example?", :kind "defn", :line 16, :end-line 28, :hash "-268962645"} {:id "defn/scored-setup-depth", :kind "defn", :line 30, :end-line 34, :hash "-217133315"} {:id "defn/scored-branch-penalty", :kind "defn", :line 36, :end-line 43, :hash "-356787910"}]}
 ;; clj-mutate-manifest-end

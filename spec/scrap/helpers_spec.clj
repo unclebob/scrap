@@ -9,10 +9,12 @@
             [scrap.example-helpers :as example-helpers]
             [scrap.example-node :as example-node]
             [scrap.example-smells :as example-smells]
+            [scrap.policy :as policy]
             [scrap.pressure-mode :as pressure-mode]
             [scrap.pressure-score :as pressure-score]
             [scrap.pressure-stability :as pressure-stability]
             [scrap.report :as report]
+            [scrap.report-model :as report-model]
             [scrap.report-summary :as report-summary]
             [scrap.scan :as scan]
             [scrap.scan-tokenize :as scan-tokenize]
@@ -161,6 +163,14 @@
       (should= 2 (count (:top-blocks result)))
       (should= 2 (count (:top-examples result)))
       (should= 4 (count (:actions result))))))
+
+(describe "policy"
+  (it "exposes validated split policy maps with explicit domains"
+    (should= 3 (:top-block-count policy/report-policy))
+    (should= 0.5 (:threshold policy/duplication-policy))
+    (should= 25.0 (:cap policy/complexity-policy))
+    (should= 35 (get-in policy/pressure-policy [:levels :high]))
+    (should= 4 (:max-actions policy/actionability-policy))))
 
 (describe "pressure"
   (it "computes ratios and stable summaries"
@@ -391,6 +401,34 @@
       (should= {:helper-hidden-lines 0} metrics))))
 
 (describe "report"
+  (it "validates analysis and guidance report models"
+    (should= "spec/a_spec.clj"
+             (:path (report-model/analysis-report
+                      {:path "spec/a_spec.clj"
+                       :content-hash "abc123"
+                       :structure-errors []
+                       :parse-error nil
+                       :examples []
+                       :blocks []})))
+    (should= "HIGH"
+             (:file-level (report-model/guidance-report
+                            {:file-score 10.0
+                             :file-level "HIGH"
+                             :remediation-mode "LOCAL"
+                             :ai-actionability "AUTO_REFACTOR"
+                             :ai-actionability-message "Tighten the examples."
+                             :actions []
+                             :top-blocks []
+                             :top-examples []})))
+    (should-throw clojure.lang.ExceptionInfo
+                  (report-model/analysis-report
+                    {:path nil
+                     :content-hash "abc123"
+                     :structure-errors []
+                     :parse-error nil
+                     :examples []
+                     :blocks []})))
+
   (it "renders comparison sections in guidance reports"
     (with-redefs [scrap.guidance/guidance (fn [_]
                                             report-guidance-result)

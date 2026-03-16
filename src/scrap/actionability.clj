@@ -40,5 +40,5 @@
        :top-examples (vec (take (:top-example-count policy/report) sorted-examples))})))
 
 ;; clj-mutate-manifest-begin
-;; {:version 1, :tested-at "2026-03-16T08:38:15.626955-05:00", :module-hash "1827921105", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 5, :hash "1342746636"} {:id "defn/guidance", :kind "defn", :line 7, :end-line 37, :hash "-1971073862"}]}
+;; {:version 1, :tested-at "2026-03-16T14:23:46.932437-05:00", :module-hash "1758517793", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 7, :hash "-1010766020"} {:id "defn/guidance", :kind "defn", :line 9, :end-line 40, :hash "1619411873"}]}
 ;; clj-mutate-manifest-end

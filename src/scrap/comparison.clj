@@ -1,5 +1,6 @@
 (ns scrap.comparison
-  (:require [scrap.pressure :as pressure]))
+  (:require [scrap.pressure :as pressure]
+            [scrap.report-model :as report-model]))
 
 (defn- delta
   [before after]
@@ -55,7 +56,7 @@
                                       :helper-hidden-delta (delta (:helper-hidden-example-count baseline-summary)
                                                                   (:helper-hidden-example-count current-summary))}]
                              (assoc cmp :verdict (verdict cmp))))]
-          (assoc report :comparison comparison)))
+          (report-model/analysis-report (assoc report :comparison comparison))))
       reports)))
 
 ;; clj-mutate-manifest-begin
