@@ -132,6 +132,23 @@
        (sort-by (fn [[k _]] (pr-str k)))
        vec))
 
+(def scalar-normalizers
+  [[symbol? (constantly 'sym)]
+   [keyword? identity]
+   [string? (constantly :string)]
+   [number? (constantly :number)]
+   [char? (constantly :char)]
+   [boolean? (constantly :boolean)]
+   [nil? (constantly nil)]])
+
+(defn- normalize-scalar
+  [expr]
+  (if-let [normalizer (some (fn [[pred f]]
+                              (when (pred expr) f))
+                            scalar-normalizers)]
+    (normalizer expr)
+    (type expr)))
+
 (defn- normalize-shape
   [expr]
   (cond
@@ -139,14 +156,7 @@
     (vector? expr) (mapv normalize-shape expr)
     (map? expr) (normalized-map-shape expr)
     (set? expr) (into #{} (map normalize-shape expr))
-    (symbol? expr) 'sym
-    (keyword? expr) expr
-    (string? expr) :string
-    (number? expr) :number
-    (char? expr) :char
-    (boolean? expr) :boolean
-    (nil? expr) nil
-    :else (type expr)))
+    :else (normalize-scalar expr)))
 
 (defn- shape-signature
   [expr]
@@ -181,6 +191,14 @@
 (defn- form-features
   [forms]
   (apply set/union #{} (map shape-features forms)))
+
+(defn- child-nodes
+  [expr]
+  (cond
+    (seq? expr) (seq expr)
+    (map? expr) (concat (keys expr) (vals expr))
+    (coll? expr) (seq expr)
+    :else nil))
 
 (defn- setup-forms
   [forms]
@@ -262,41 +280,51 @@
 
 (declare helper-expanded-metrics)
 
+(defn- helper-call?
+  [head helper-defs]
+  (and (symbol? head) (contains? helper-defs head)))
+
+(defn- next-setup-depth
+  [head setup-depth]
+  (if (contains? setup-heads head)
+    (inc setup-depth)
+    setup-depth))
+
+(defn- subject-symbols-for-head
+  [head helper-call?]
+  (cond
+    (namespaced-symbol? head) #{head}
+    (and (symbol? head)
+         (not helper-call?)
+         (not (control-symbol? head)))
+    #{head}
+    :else #{}))
+
+(defn- local-node-metrics
+  [expr head helper-call? setup-depth]
+  {:assertions (if (contains? assertion-heads head) 1 0)
+   :branches (if (contains? branch-heads head) 1 0)
+   :table-branches (if (contains? table-branch-heads head) 1 0)
+   :with-redefs (if (= 'with-redefs head) 1 0)
+   :helper-calls (if helper-call? 1 0)
+   :helper-hidden-lines 0
+   :temp-resources (if (temp-resource-call? head) 1 0)
+   :large-literals (if (large-literal? expr) 1 0)
+   :max-setup-depth setup-depth
+   :subject-symbols (subject-symbols-for-head head helper-call?)
+   :table-driven? (table-driven-form? expr)})
+
 (defn- analyze-node
   [expr helper-context setup-depth helper-stack]
   (let [{:keys [helper-defs helper-cache]} helper-context
         head (seq-head expr)
-        helper-call? (and (symbol? head) (contains? helper-defs head))
-        next-depth (if (contains? setup-heads head)
-                     (inc setup-depth)
-                     setup-depth)
-        children (cond
-                   (seq? expr) (seq expr)
-                   (map? expr) (concat (keys expr) (vals expr))
-                   (coll? expr) (seq expr)
-                   :else nil)
-        child-metrics (map #(analyze-node % helper-context next-depth helper-stack) children)
+        helper-call? (helper-call? head helper-defs)
+        next-depth (next-setup-depth head setup-depth)
+        child-metrics (map #(analyze-node % helper-context next-depth helper-stack) (child-nodes expr))
         helper-metrics (if (and helper-call? (not (contains? helper-stack head)))
                          (helper-expanded-metrics helper-context head (conj helper-stack head) setup-depth)
                          nil)
-        subject-symbols (cond
-                          (namespaced-symbol? head) #{head}
-                          (and (symbol? head)
-                               (not helper-call?)
-                               (not (control-symbol? head)))
-                          #{head}
-                          :else #{})
-        local {:assertions (if (contains? assertion-heads head) 1 0)
-               :branches (if (contains? branch-heads head) 1 0)
-               :table-branches (if (contains? table-branch-heads head) 1 0)
-               :with-redefs (if (= 'with-redefs head) 1 0)
-               :helper-calls (if helper-call? 1 0)
-               :helper-hidden-lines 0
-               :temp-resources (if (temp-resource-call? head) 1 0)
-               :large-literals (if (large-literal? expr) 1 0)
-               :max-setup-depth setup-depth
-               :subject-symbols subject-symbols
-               :table-driven? (table-driven-form? expr)}]
+        local (local-node-metrics expr head helper-call? setup-depth)]
     (apply combine-metrics
            local
            (concat child-metrics (when helper-metrics [helper-metrics])))))
@@ -334,77 +362,95 @@
        (<= phases 1)
        (<= line-count 18)))
 
+(defn- raw-line-count
+  [form]
+  (max 1 (inc (- (or (-> form meta :end-line) (-> form meta :line) 1)
+                 (or (-> form meta :line) 1)))))
+
+(defn- example-form-shapes
+  [body helper-context inherited-setup-forms]
+  (let [local-setup (setup-forms body)
+        effective-setup (vec (concat inherited-setup-forms local-setup))
+        assert-forms* (assert-forms body helper-context)
+        arrange-forms* (arrange-forms body helper-context)
+        setup-signatures (form-signatures effective-setup)]
+    {:effective-setup effective-setup
+     :assert-signatures (form-signatures assert-forms*)
+     :assert-features (form-features assert-forms*)
+     :setup-signatures setup-signatures
+     :setup-features (form-features effective-setup)
+     :arrange-signatures (form-signatures arrange-forms*)
+     :arrange-features (form-features arrange-forms*)
+     :literal-signatures (vec (mapcat collect-large-literal-signatures body))
+     :fixture-shape (when (seq setup-signatures) (shape-signature setup-signatures))
+     :fixture-features (if (seq setup-signatures)
+                        (shape-features setup-signatures)
+                        #{})}))
+
+(defn- smell-entries
+  [metrics line-count phases table-driven? api-contract?]
+  (->> [(when (zero? (:assertions metrics))
+          {:label "no-assertions" :penalty 10})
+        (when (and (= 1 (:assertions metrics)) (> line-count 10) (not table-driven?) (not api-contract?))
+          {:label "low-assertion-density" :penalty 6})
+        (when (> phases 1)
+          {:label "multiple-phases" :penalty 5})
+        (when (> (:with-redefs metrics) 3)
+          {:label "high-mocking" :penalty 4})
+        (when (and (> line-count 20) (not api-contract?))
+          {:label "large-example" :penalty 4})
+        (when (pos? (:temp-resources metrics))
+          {:label "temp-resource-work" :penalty 3})
+        (when (pos? (:large-literals metrics))
+          {:label "literal-heavy-setup" :penalty 3})
+        (when (> (:helper-hidden-lines metrics) 8)
+          {:label "helper-hidden-complexity" :penalty 4})]
+       (remove nil?)
+       vec))
+
+(defn- scored-setup-depth
+  [metrics api-contract?]
+  (if api-contract?
+    (max 0 (- (:max-setup-depth metrics) 2))
+    (:max-setup-depth metrics)))
+
+(defn- scored-branch-penalty
+  [metrics table-driven? api-contract?]
+  (let [branch-penalty (if table-driven?
+                         (:table-branches metrics)
+                         (+ (:branches metrics) (:table-branches metrics)))]
+    (if api-contract?
+      (max 0 (- branch-penalty 2))
+      branch-penalty)))
+
 (defn- score-example
   [it-form helper-context inherited-setup-forms describe-path]
   (let [[_ name & body] it-form
         inherited-setup (count inherited-setup-forms)
         metrics (apply combine-metrics (map #(analyze-node % helper-context inherited-setup #{}) body))
-        raw-line-count (max 1 (inc (- (or (-> it-form meta :end-line) (-> it-form meta :line) 1)
-                                      (or (-> it-form meta :line) 1))))
-        line-count (+ raw-line-count (:helper-hidden-lines metrics))
-        local-setup (setup-forms body)
-        effective-setup (vec (concat inherited-setup-forms local-setup))
-        assert-signatures (form-signatures (assert-forms body helper-context))
-        assert-features (form-features (assert-forms body helper-context))
-        setup-signatures (form-signatures effective-setup)
-        setup-features (form-features effective-setup)
-        arrange-signatures (form-signatures (arrange-forms body helper-context))
-        arrange-features (form-features (arrange-forms body helper-context))
-        literal-signatures (vec (mapcat collect-large-literal-signatures body))
-        literal-features (set literal-signatures)
-        fixture-shape (when (seq setup-signatures) (shape-signature setup-signatures))
-        fixture-features (if (seq setup-signatures)
-                           (shape-features setup-signatures)
-                           #{})
+        raw-lines (raw-line-count it-form)
+        line-count (+ raw-lines (:helper-hidden-lines metrics))
+        shapes (example-form-shapes body helper-context inherited-setup-forms)
+        literal-features (set (:literal-signatures shapes))
         phases (assertion-clusters body helper-context)
         api-contract? (api-contract-example? metrics line-count phases)
-        scored-setup-depth (if api-contract?
-                             (max 0 (- (:max-setup-depth metrics) 2))
-                             (:max-setup-depth metrics))
+        scored-setup-depth (scored-setup-depth metrics api-contract?)
         complexity (+ 1
                       (:branches metrics)
                       scored-setup-depth
                       (:helper-calls metrics)
                       (quot (:helper-hidden-lines metrics) 8))
         table-driven? (:table-driven? metrics)
-        smell-entries (cond-> []
-                        (zero? (:assertions metrics))
-                        (conj {:label "no-assertions" :penalty 10})
-
-                        (and (= 1 (:assertions metrics)) (> line-count 10) (not table-driven?) (not api-contract?))
-                        (conj {:label "low-assertion-density" :penalty 6})
-
-                        (> phases 1)
-                        (conj {:label "multiple-phases" :penalty 5})
-
-                        (> (:with-redefs metrics) 3)
-                        (conj {:label "high-mocking" :penalty 4})
-
-                        (and (> line-count 20) (not api-contract?))
-                        (conj {:label "large-example" :penalty 4})
-
-                        (pos? (:temp-resources metrics))
-                        (conj {:label "temp-resource-work" :penalty 3})
-
-                        (pos? (:large-literals metrics))
-                        (conj {:label "literal-heavy-setup" :penalty 3})
-
-                        (> (:helper-hidden-lines metrics) 8)
-                        (conj {:label "helper-hidden-complexity" :penalty 4}))
+        smell-entries (smell-entries metrics line-count phases table-driven? api-contract?)
         smell-penalty (reduce + (map :penalty smell-entries))
-        branch-penalty (if table-driven?
-                         (:table-branches metrics)
-                         (+ (:branches metrics) (:table-branches metrics)))
-        scored-branch-penalty (if api-contract?
-                                (max 0 (- branch-penalty 2))
-                                branch-penalty)
+        scored-branch-penalty (scored-branch-penalty metrics table-driven? api-contract?)
         complexity-score (saturating-complexity-score (+ 1 scored-branch-penalty scored-setup-depth (:helper-calls metrics)))
         scrap (+ complexity-score smell-penalty)]
     {:name name
      :describe-path describe-path
      :line (or (-> it-form meta :line) 1)
      :line-count line-count
-     :raw-line-count raw-line-count
+     :raw-line-count raw-lines
      :assertions (:assertions metrics)
      :branches (+ (:branches metrics) (:table-branches metrics))
      :setup-depth (:max-setup-depth metrics)
@@ -417,15 +463,15 @@
      :complexity complexity
      :complexity-score complexity-score
      :subject-symbols (:subject-symbols metrics)
-     :assert-signatures assert-signatures
-     :assert-features assert-features
-     :setup-signatures setup-signatures
-     :setup-features setup-features
-     :fixture-shape fixture-shape
-     :fixture-features fixture-features
-     :arrange-signatures arrange-signatures
-     :arrange-features arrange-features
-     :literal-signatures literal-signatures
+     :assert-signatures (:assert-signatures shapes)
+     :assert-features (:assert-features shapes)
+     :setup-signatures (:setup-signatures shapes)
+     :setup-features (:setup-features shapes)
+     :fixture-shape (:fixture-shape shapes)
+     :fixture-features (:fixture-features shapes)
+     :arrange-signatures (:arrange-signatures shapes)
+     :arrange-features (:arrange-features shapes)
+     :literal-signatures (:literal-signatures shapes)
      :literal-features literal-features
      :scrap scrap
      :smells (mapv :label smell-entries)}))
@@ -601,21 +647,29 @@
   [n d]
   (if (pos? d) (/ n d) 0.0))
 
+(defn- stable-small-summary?
+  [summary example-count zero-assertion-ratio]
+  (and (<= example-count 2)
+       (<= (or (:max-scrap summary) 0) 10)
+       (<= (or (:effective-duplication-score summary) 0) 1)
+       (zero? (or (:helper-hidden-example-count summary) 0))
+       (<= zero-assertion-ratio 0.0)))
+
+(defn- stable-general-summary?
+  [summary example-count zero-assertion-ratio low-assertion-ratio]
+  (and (pos? example-count)
+       (<= (or (:max-scrap summary) 0) 12)
+       (<= (or (:effective-duplication-score summary) 0) 3)
+       (<= zero-assertion-ratio 0.0)
+       (<= low-assertion-ratio 0.35)))
+
 (defn- stable-summary?
   [summary]
   (let [example-count (or (:example-count summary) 0)
         zero-assertion-ratio (ratio (or (:zero-assertion-examples summary) 0) example-count)
         low-assertion-ratio (ratio (or (:low-assertion-examples summary) 0) example-count)]
-    (or (and (<= example-count 2)
-             (<= (or (:max-scrap summary) 0) 10)
-             (<= (or (:effective-duplication-score summary) 0) 1)
-             (zero? (or (:helper-hidden-example-count summary) 0))
-             (<= zero-assertion-ratio 0.0))
-        (and (pos? example-count)
-             (<= (or (:max-scrap summary) 0) 12)
-             (<= (or (:effective-duplication-score summary) 0) 3)
-             (<= zero-assertion-ratio 0.0)
-             (<= low-assertion-ratio 0.35)))))
+    (or (stable-small-summary? summary example-count zero-assertion-ratio)
+        (stable-general-summary? summary example-count zero-assertion-ratio low-assertion-ratio))))
 
 (defn- size-factor
   [summary]
@@ -628,13 +682,14 @@
 
 (defn- refactor-pressure-score
   [summary]
-  (let [base (+ (* 1.2 (or (:avg-scrap summary) 0))
+  (let [example-count (or (:example-count summary) 0)
+        base (+ (* 1.2 (or (:avg-scrap summary) 0))
                 (* 0.6 (or (:max-scrap summary) 0))
                 (* 0.8 (or (:effective-duplication-score summary) 0))
-                (* 20 (ratio (or (:low-assertion-examples summary) 0) (or (:example-count summary) 0)))
-                (* 15 (ratio (or (:branching-examples summary) 0) (or (:example-count summary) 0)))
-                (* 15 (ratio (or (:with-redefs-examples summary) 0) (or (:example-count summary) 0)))
-                (* 12 (ratio (or (:helper-hidden-example-count summary) 0) (or (:example-count summary) 0))))
+                (* 20 (ratio (or (:low-assertion-examples summary) 0) example-count))
+                (* 15 (ratio (or (:branching-examples summary) 0) example-count))
+                (* 15 (ratio (or (:with-redefs-examples summary) 0) example-count))
+                (* 12 (ratio (or (:helper-hidden-example-count summary) 0) example-count)))
         matrix-credit (* 1.5 (or (:case-matrix-repetition summary) 0))]
     (max 0 (- (* (size-factor summary) base) matrix-credit))))
 
@@ -648,23 +703,30 @@
       (>= score 18) "MEDIUM"
       :else "LOW")))
 
+(defn- split-pressure?
+  [summary]
+  (let [avg-scrap (or (:avg-scrap summary) 0)
+        harmful-duplication (or (:effective-duplication-score summary) 0)
+        subject-repetition (or (:subject-repetition-score summary) 0)
+        helper-hidden (or (:helper-hidden-example-count summary) 0)]
+    (or (>= avg-scrap 10)
+        (>= harmful-duplication 20)
+        (>= subject-repetition 12)
+        (pos? helper-hidden))))
+
+(defn- enough-hotspots-to-split?
+  [summary high-pressure-blocks]
+  (or (>= high-pressure-blocks 2)
+      (>= (or (:max-scrap summary) 0) 35)))
+
 (defn- split-candidate?
   [summary blocks]
   (let [example-count (or (:example-count summary) 0)
-        max-scrap (or (:max-scrap summary) 0)
-        avg-scrap (or (:avg-scrap summary) 0)
-        harmful-duplication (or (:effective-duplication-score summary) 0)
-        subject-repetition (or (:subject-repetition-score summary) 0)
-        helper-hidden (or (:helper-hidden-example-count summary) 0)
         high-pressure-blocks (count (filter #(contains? #{"HIGH" "CRITICAL"} (pressure-level (:summary %))) blocks))]
     (and (not (stable-summary? summary))
          (>= example-count 12)
-         (or (>= high-pressure-blocks 2)
-             (>= max-scrap 35))
-         (or (>= avg-scrap 10)
-             (>= harmful-duplication 20)
-             (>= subject-repetition 12)
-             (pos? helper-hidden)))))
+         (enough-hotspots-to-split? summary high-pressure-blocks)
+         (split-pressure? summary))))
 
 (defn- remediation-mode
   [summary blocks]
@@ -679,82 +741,103 @@
    :label ({3 "HIGH" 2 "MEDIUM" 1 "LOW"} confidence)
    :text text})
 
+(defn- matrix-heavy?
+  [summary max-scrap branching-ratio mocking-ratio]
+  (let [coverage-matrix-candidates (or (:coverage-matrix-candidates summary) 0)
+        case-matrix-repetition (or (:case-matrix-repetition summary) 0)
+        harmful-duplication (or (:effective-duplication-score summary) 0)]
+    (and (pos? coverage-matrix-candidates)
+         (>= case-matrix-repetition (max 2 (quot harmful-duplication 3)))
+         (<= max-scrap 12)
+         (<= branching-ratio 0.15)
+         (< mocking-ratio 0.2))))
+
+(defn- local-safe?
+  [mode summary zero-assertion-ratio low-assertion-ratio branching-ratio mocking-ratio]
+  (let [harmful-duplication (or (:effective-duplication-score summary) 0)
+        max-scrap (or (:max-scrap summary) 0)]
+    (and (= mode "LOCAL")
+         (or (> harmful-duplication 0)
+             (> zero-assertion-ratio 0.0)
+             (> low-assertion-ratio 0.4)
+             (> max-scrap 20))
+         (<= branching-ratio 0.3)
+         (< mocking-ratio 0.35))))
+
 (defn- ai-actionability
   [summary blocks]
   (let [mode (remediation-mode summary blocks)
         example-count (or (:example-count summary) 0)
         max-scrap (or (:max-scrap summary) 0)
-        harmful-duplication (or (:effective-duplication-score summary) 0)
-        coverage-matrix-candidates (or (:coverage-matrix-candidates summary) 0)
-        case-matrix-repetition (or (:case-matrix-repetition summary) 0)
         low-assertion-ratio (ratio (or (:low-assertion-examples summary) 0) example-count)
         zero-assertion-ratio (ratio (or (:zero-assertion-examples summary) 0) example-count)
         branching-ratio (ratio (or (:branching-examples summary) 0) example-count)
-        mocking-ratio (ratio (or (:with-redefs-examples summary) 0) example-count)
-        matrix-heavy? (and (pos? coverage-matrix-candidates)
-                           (>= case-matrix-repetition (max 2 (quot harmful-duplication 3)))
-                           (<= max-scrap 12)
-                           (<= branching-ratio 0.15)
-                           (< mocking-ratio 0.2))
-        local-safe? (and (= mode "LOCAL")
-                         (or (> harmful-duplication 0)
-                             (> zero-assertion-ratio 0.0)
-                             (> low-assertion-ratio 0.4)
-                             (> max-scrap 20))
-                         (<= branching-ratio 0.3)
-                         (< mocking-ratio 0.35))]
-    (cond
-      (= mode "STABLE") {:mode "LEAVE_ALONE"
-                         :message "Leave this file alone unless explicitly requested; the current structure is stable enough."}
-      matrix-heavy? {:mode "AUTO_TABLE_DRIVE"
-                     :message "Safe to table-drive automatically; repetition looks like coverage-matrix structure rather than harmful design."}
-      local-safe? {:mode "AUTO_REFACTOR"
-                   :message "Safe to refactor automatically with local changes; focus on assertions, oversized examples, and duplicated scaffolding."}
-      (= mode "SPLIT") {:mode "MANUAL_SPLIT"
-                        :message "Do not auto-refactor locally first; split the file by responsibility before smaller cleanup."}
-      :else {:mode "REVIEW_FIRST"
-             :message "Do not auto-refactor immediately; inspect the file shape before acting on the recommendations."})))
+        mocking-ratio (ratio (or (:with-redefs-examples summary) 0) example-count)]
+    (or (when (= mode "STABLE")
+          {:mode "LEAVE_ALONE"
+           :message "Leave this file alone unless explicitly requested; the current structure is stable enough."})
+        (when (matrix-heavy? summary max-scrap branching-ratio mocking-ratio)
+          {:mode "AUTO_TABLE_DRIVE"
+           :message "Safe to table-drive automatically; repetition looks like coverage-matrix structure rather than harmful design."})
+        (when (local-safe? mode summary zero-assertion-ratio low-assertion-ratio branching-ratio mocking-ratio)
+          {:mode "AUTO_REFACTOR"
+           :message "Safe to refactor automatically with local changes; focus on assertions, oversized examples, and duplicated scaffolding."})
+        (when (= mode "SPLIT")
+          {:mode "MANUAL_SPLIT"
+           :message "Do not auto-refactor locally first; split the file by responsibility before smaller cleanup."})
+        {:mode "REVIEW_FIRST"
+         :message "Do not auto-refactor immediately; inspect the file shape before acting on the recommendations."})))
+
+(defn- recommendation-rule
+  [enabled? recommendation]
+  (when enabled? recommendation))
+
+(defn- local-action-rules
+  [summary mode zero-assertion-ratio low-assertion-ratio branching-ratio mocking-ratio harmful-duplication]
+  [(recommendation-rule
+     (pos? (or (:coverage-matrix-candidates summary) 0))
+     (recommendation 3 "Convert repeated low-complexity examples into table-driven checks; treat this as coverage-matrix repetition, not harmful duplication."))
+   (recommendation-rule
+     (or (> zero-assertion-ratio 0.0) (> low-assertion-ratio 0.4))
+     (recommendation 3 "Strengthen assertions in weak examples before doing structural cleanup."))
+   (recommendation-rule
+     (and (= mode "LOCAL") (> (or (:max-scrap summary) 0) 20))
+     (recommendation 3 "Split oversized examples into narrower examples."))
+   (recommendation-rule
+     (> harmful-duplication 0)
+     (recommendation 2 "Extract shared setup or repeated assertion scaffolding only where harmful duplication is dominating."))
+   (recommendation-rule
+     (> mocking-ratio 0.3)
+     (recommendation 2 "Reduce mocking and move coverage toward higher-level behaviors."))
+   (recommendation-rule
+     (> branching-ratio 0.3)
+     (recommendation 2 "Remove logic from specs or keep variation in explicit data tables rather than control flow."))
+   (recommendation-rule
+     (> (or (:helper-hidden-example-count summary) 0) 0)
+     (recommendation 1 "Be skeptical of helper extraction that only hides setup; helper-hidden complexity should still count as complexity."))
+   (recommendation-rule
+     (and (= mode "LOCAL") (> (or (:avg-scrap summary) 0) 12))
+     (recommendation 1 "Consider splitting this file or block by responsibility."))])
 
 (defn- recommendation-actions
   [summary blocks]
   (let [mode (remediation-mode summary blocks)]
     (if (= mode "STABLE")
-    [(recommendation 3 "No refactor recommended; the file is structurally stable enough to leave alone.")]
-    (let [example-count (or (:example-count summary) 0)
-          low-assertion-ratio (ratio (or (:low-assertion-examples summary) 0) example-count)
-          zero-assertion-ratio (ratio (or (:zero-assertion-examples summary) 0) example-count)
-          branching-ratio (ratio (or (:branching-examples summary) 0) example-count)
-          mocking-ratio (ratio (or (:with-redefs-examples summary) 0) example-count)
-          harmful-duplication (or (:effective-duplication-score summary) 0)]
-      (->> (cond-> []
-             (= mode "SPLIT")
-             (conj (recommendation 3 "Split this spec file by responsibility before attempting local cleanup; the structural pressure is spread across multiple hotspots."))
-
-             (pos? (or (:coverage-matrix-candidates summary) 0))
-             (conj (recommendation 3 "Convert repeated low-complexity examples into table-driven checks; treat this as coverage-matrix repetition, not harmful duplication."))
-
-             (or (> zero-assertion-ratio 0.0) (> low-assertion-ratio 0.4))
-             (conj (recommendation 3 "Strengthen assertions in weak examples before doing structural cleanup."))
-
-             (and (= mode "LOCAL") (> (or (:max-scrap summary) 0) 20))
-             (conj (recommendation 3 "Split oversized examples into narrower examples."))
-
-             (> harmful-duplication 0)
-             (conj (recommendation 2 "Extract shared setup or repeated assertion scaffolding only where harmful duplication is dominating."))
-
-             (> mocking-ratio 0.3)
-             (conj (recommendation 2 "Reduce mocking and move coverage toward higher-level behaviors."))
-
-             (> branching-ratio 0.3)
-             (conj (recommendation 2 "Remove logic from specs or keep variation in explicit data tables rather than control flow."))
-
-             (> (or (:helper-hidden-example-count summary) 0) 0)
-             (conj (recommendation 1 "Be skeptical of helper extraction that only hides setup; helper-hidden complexity should still count as complexity."))
-
-             (and (= mode "LOCAL") (> (or (:avg-scrap summary) 0) 12))
-             (conj (recommendation 1 "Consider splitting this file or block by responsibility.")))
-           (sort-by (juxt (comp - :confidence) :text))
-           vec)))))
+      [(recommendation 3 "No refactor recommended; the file is structurally stable enough to leave alone.")]
+      (let [example-count (or (:example-count summary) 0)
+            low-assertion-ratio (ratio (or (:low-assertion-examples summary) 0) example-count)
+            zero-assertion-ratio (ratio (or (:zero-assertion-examples summary) 0) example-count)
+            branching-ratio (ratio (or (:branching-examples summary) 0) example-count)
+            mocking-ratio (ratio (or (:with-redefs-examples summary) 0) example-count)
+            harmful-duplication (or (:effective-duplication-score summary) 0)
+            split-rule (recommendation-rule
+                         (= mode "SPLIT")
+                         (recommendation 3 "Split this spec file by responsibility before attempting local cleanup; the structural pressure is spread across multiple hotspots."))]
+        (->> (cons split-rule
+                   (local-action-rules summary mode zero-assertion-ratio low-assertion-ratio branching-ratio mocking-ratio harmful-duplication))
+             (remove nil?)
+             (sort-by (juxt (comp - :confidence) :text))
+             vec)))))
 
 (defn- guidance
   [{:keys [summary blocks examples]}]
@@ -772,32 +855,37 @@
      :top-blocks (vec (take default-top-block-count sorted-blocks))
      :top-examples (vec (take default-top-example-count sorted-examples))}))
 
+(defn- process-quoted-char
+  [state c]
+  (cond
+    (= c \\) (assoc state :escape true)
+    (= c \") (assoc state :mode :normal)
+    (= c \newline) (update state :line inc)
+    :else state))
+
+(defn- process-normal-char
+  [state c next-c]
+  (cond
+    (= c \;) (assoc state :mode :comment)
+    (= c \\) (assoc state :escape true)
+    (= c \") (assoc state :mode :string)
+    (and (= c \#) (= next-c \")) (assoc state :mode :regex :skip true)
+    (= c \newline) (update state :line inc)
+    (= c \() (update state :depth inc)
+    (= c \)) (update state :depth dec)
+    :else state))
+
 (defn- process-char [state c next-c]
-  (let [{:keys [mode depth line escape skip]} state]
+  (let [{:keys [mode line escape skip]} state]
     (cond
       skip (assoc state :skip false)
       escape (assoc state :escape false)
       (= mode :comment) (if (= c \newline)
                           (assoc state :mode :normal :line (inc line))
                           state)
-      (= mode :string) (cond
-                         (= c \\) (assoc state :escape true)
-                         (= c \") (assoc state :mode :normal)
-                         (= c \newline) (update state :line inc)
-                         :else state)
-      (= mode :regex) (cond
-                        (= c \\) (assoc state :escape true)
-                        (= c \") (assoc state :mode :normal)
-                        (= c \newline) (update state :line inc)
-                        :else state)
-      (= c \;) (assoc state :mode :comment)
-      (= c \\) (assoc state :escape true)
-      (= c \") (assoc state :mode :string)
-      (and (= c \#) (= next-c \")) (assoc state :mode :regex :skip true)
-      (= c \newline) (update state :line inc)
-      (= c \() (update state :depth inc)
-      (= c \)) (update state :depth dec)
-      :else state)))
+      (= mode :string) (process-quoted-char state c)
+      (= mode :regex) (process-quoted-char state c)
+      :else (process-normal-char state c next-c))))
 
 (def token-delimiters #{\space \newline \tab \( \) \"})
 
@@ -814,64 +902,68 @@
         (when (> end start)
           (apply str (subvec chars start end)))))))
 
+(defn- nesting-error
+  [line form parent]
+  (str "ERROR line " line ": (" form ") inside (" (:form parent) ") at line " (:line parent)))
+
+(defn- invalid-parent-child?
+  [parent-form form]
+  (or (= parent-form "it")
+      (and (= parent-form "describe") (= form "describe"))
+      (and (= parent-form "context") (= form "describe"))
+      (and (= parent-form "it") (#{"before" "with-stubs" "around" "with" "context"} form))))
+
 (defn- validate-nesting [form line form-stack]
   (when-let [parent (peek form-stack)]
-    (let [parent-form (:form parent)]
-      (cond
-        (= parent-form "it")
-        (str "ERROR line " line ": (" form ") inside (it) at line " (:line parent))
-
-        (and (= parent-form "describe") (= form "describe"))
-        (str "ERROR line " line ": (describe) inside (describe) at line " (:line parent))
-
-        (and (= parent-form "context") (= form "describe"))
-        (str "ERROR line " line ": (describe) inside (context) at line " (:line parent))
-
-        (and (= parent-form "it") (#{"before" "with-stubs" "around" "with" "context"} form))
-        (str "ERROR line " line ": (" form ") inside (it) at line " (:line parent))))))
+    (when (invalid-parent-child? (:form parent) form)
+      (nesting-error line form parent))))
 
 (defn- pop-form [form-stack]
   (let [completed (peek form-stack)
         stack (pop form-stack)]
     (assoc completed :stack stack)))
 
+(defn- scan-char-step
+  [chars n]
+  (fn [state i]
+    (let [c (nth chars i)
+          next-c (when (< (inc i) n) (nth chars (inc i)))
+          old-depth (:depth state)
+          old-mode (:mode state)
+          state (process-char state c next-c)
+          new-depth (:depth state)]
+      (cond
+        (and (= old-mode :normal) (= c \() (> new-depth old-depth))
+        (let [token (extract-token chars i)]
+          (if (and token (speclj-forms token))
+            (let [error (validate-nesting token (:line state) (:form-stack state))]
+              (cond-> state
+                error (update :errors conj error)
+                true (update :form-stack conj {:form token :line (:line state) :depth old-depth})))
+            state))
+
+        (and (= old-mode :normal) (= c \)) (< new-depth old-depth)
+             (seq (:form-stack state))
+             (= new-depth (:depth (peek (:form-stack state)))))
+        (assoc state :form-stack (:stack (pop-form (:form-stack state))))
+
+        :else state))))
+
+(defn- unclosed-errors
+  [result]
+  (let [eof-line (:line result)]
+    (mapv (fn [entry]
+            (str "ERROR line " eof-line ": unclosed (" (:form entry)
+                 ") from line " (:line entry)))
+          (:form-stack result))))
+
 (defn scan-structure
   [text]
   (let [chars (vec text)
         n (count chars)
         init {:mode :normal :depth 0 :line 1 :escape false :skip false :errors [] :form-stack []}
-        result (reduce
-                 (fn [state i]
-                   (let [c (nth chars i)
-                         next-c (when (< (inc i) n) (nth chars (inc i)))
-                         old-depth (:depth state)
-                         old-mode (:mode state)
-                         state (process-char state c next-c)
-                         new-depth (:depth state)]
-                     (cond
-                       (and (= old-mode :normal) (= c \() (> new-depth old-depth))
-                       (let [token (extract-token chars i)]
-                         (if (and token (speclj-forms token))
-                           (let [error (validate-nesting token (:line state) (:form-stack state))]
-                             (cond-> state
-                               error (update :errors conj error)
-                               true (update :form-stack conj {:form token :line (:line state) :depth old-depth})))
-                           state))
-
-                       (and (= old-mode :normal) (= c \)) (< new-depth old-depth)
-                            (seq (:form-stack state))
-                            (= new-depth (:depth (peek (:form-stack state)))))
-                       (assoc state :form-stack (:stack (pop-form (:form-stack state))))
-
-                       :else state)))
-                 init
-                 (range n))
-        eof-line (:line result)
-        unclosed-errors (mapv (fn [entry]
-                                (str "ERROR line " eof-line ": unclosed (" (:form entry)
-                                     ") from line " (:line entry)))
-                              (:form-stack result))]
-    (into (:errors result) unclosed-errors)))
+        result (reduce (scan-char-step chars n) init (range n))]
+    (into (:errors result) (unclosed-errors result))))
 
 (defn- content-hash
   [s]
@@ -964,27 +1056,31 @@
   [before after]
   (- (or after 0) (or before 0)))
 
+(defn- improved-comparison?
+  [comparison]
+  (and (<= (:file-score-delta comparison) -5)
+       (<= (:harmful-duplication-delta comparison) 0)
+       (<= (:max-scrap-delta comparison) 0)))
+
+(defn- helper-regression?
+  [comparison]
+  (and (pos? (:helper-hidden-delta comparison))
+       (>= (:harmful-duplication-delta comparison) 0)
+       (<= (:case-matrix-delta comparison) 0)))
+
+(defn- worsening-comparison?
+  [comparison]
+  (or (pos? (:harmful-duplication-delta comparison))
+      (pos? (:max-scrap-delta comparison))
+      (>= (:file-score-delta comparison) 5)))
+
 (defn- verdict
   [comparison]
   (cond
-    (and (<= (:file-score-delta comparison) -5)
-         (<= (:harmful-duplication-delta comparison) 0)
-         (<= (:max-scrap-delta comparison) 0))
-    :improved
-
-    (and (pos? (:helper-hidden-delta comparison))
-         (>= (:harmful-duplication-delta comparison) 0)
-         (<= (:case-matrix-delta comparison) 0))
-    :worse
-
-    (or (pos? (:harmful-duplication-delta comparison))
-        (pos? (:max-scrap-delta comparison))
-        (>= (:file-score-delta comparison) 5))
-    :worse
-
-    (zero? (:file-score-delta comparison))
-    :unchanged
-
+    (improved-comparison? comparison) :improved
+    (helper-regression? comparison) :worse
+    (worsening-comparison? comparison) :worse
+    (zero? (:file-score-delta comparison)) :unchanged
     :else :mixed))
 
 (defn compare-reports
@@ -1013,6 +1109,17 @@
           (assoc report :comparison comparison)))
       reports)))
 
+(defn- apply-arg
+  [opts remaining]
+  (let [arg (first remaining)]
+    (case arg
+      "--help" [(assoc opts :help true) (rest remaining)]
+      "--verbose" [(assoc opts :verbose true) (rest remaining)]
+      "--json" [(assoc opts :json true) (rest remaining)]
+      "--write-baseline" [(assoc opts :write-baseline true) (rest remaining)]
+      "--compare" [(assoc opts :compare (second remaining)) (nnext remaining)]
+      [(update opts :paths conj arg) (rest remaining)])))
+
 (defn- parse-args
   [args]
   (loop [opts {:help false
@@ -1022,25 +1129,9 @@
                :compare nil
                :paths []}
          remaining args]
-    (if-let [arg (first remaining)]
-      (cond
-        (= arg "--help")
-        (recur (assoc opts :help true) (rest remaining))
-
-        (= arg "--verbose")
-        (recur (assoc opts :verbose true) (rest remaining))
-
-        (= arg "--json")
-        (recur (assoc opts :json true) (rest remaining))
-
-        (= arg "--write-baseline")
-        (recur (assoc opts :write-baseline true) (rest remaining))
-
-        (= arg "--compare")
-        (recur (assoc opts :compare (second remaining)) (nnext remaining))
-
-        :else
-        (recur (update opts :paths conj arg) (rest remaining)))
+    (if (seq remaining)
+      (let [[next-opts next-remaining] (apply-arg opts remaining)]
+        (recur next-opts next-remaining))
       opts)))
 
 (defn usage
@@ -1074,6 +1165,77 @@
          (when (= :worse (:verdict comparison))
            "    recommendation: Refactor appears negative; consider reverting or simplifying helper extraction.\n"))))
 
+(defn- summary-ratio-lines
+  [summary]
+  [["low-assertion-ratio" (format "%.2f" (double (ratio (or (:low-assertion-examples summary) 0)
+                                                       (or (:example-count summary) 0))))]
+   ["branching-ratio" (format "%.2f" (double (ratio (or (:branching-examples summary) 0)
+                                                   (or (:example-count summary) 0))))]
+   ["mocking-ratio" (format "%.2f" (double (ratio (or (:with-redefs-examples summary) 0)
+                                                 (or (:example-count summary) 0))))]])
+
+(defn- render-summary-lines
+  [lines indent]
+  (str/join "\n" (map (fn [[label value]] (str indent label ": " value)) lines)))
+
+(defn- guidance-why-section
+  [summary]
+  (let [base-lines [["avg-scrap" (format "%.1f" (double (or (:avg-scrap summary) 0.0)))]
+                    ["max-scrap" (or (:max-scrap summary) 0)]
+                    ["harmful-duplication-score" (or (:harmful-duplication-score summary) 0)]
+                    ["effective-duplication-score" (or (:effective-duplication-score summary) 0)]
+                    ["coverage-matrix-candidates" (or (:coverage-matrix-candidates summary) 0)]
+                    ["case-matrix-repetition" (or (:case-matrix-repetition summary) 0)]
+                    ["subject-repetition-score" (or (:subject-repetition-score summary) 0)]
+                    ["helper-hidden-example-count" (or (:helper-hidden-example-count summary) 0)]]
+        lines (concat base-lines (summary-ratio-lines summary))]
+    (str "  why:\n"
+         (render-summary-lines lines "    ")
+         "\n")))
+
+(defn- render-top-block
+  [{:keys [path summary worst-example]}]
+  (str "    "
+       (str/join " / " path)
+       " -> "
+       (pressure-level summary)
+       ", avg-scrap "
+       (format "%.1f" (double (round1 (or (:avg-scrap summary) 0.0))))
+       ", harmful duplication "
+       (or (:harmful-duplication-score summary) 0)
+       ", worst "
+       (:name worst-example)
+       " (SCRAP " (format "%.1f" (double (round1 (:scrap worst-example)))) ")"))
+
+(defn- guidance-where-section
+  [top-blocks]
+  (when (seq top-blocks)
+    (str "  where:\n"
+         (str/join "\n" (map render-top-block top-blocks))
+         "\n")))
+
+(defn- render-top-example
+  [example]
+  (str "    "
+       (str/join " / " (conj (:describe-path example) (:name example)))
+       " -> SCRAP " (format "%.1f" (double (round1 (:scrap example))))
+       (when (seq (:smells example))
+         (str " [" (format-smells (:smells example)) "]"))))
+
+(defn- guidance-worst-section
+  [top-examples]
+  (when (seq top-examples)
+    (str "  worst-examples:\n"
+         (str/join "\n" (map render-top-example top-examples))
+         "\n")))
+
+(defn- guidance-how-section
+  [actions]
+  (when (seq actions)
+    (str "  how:\n"
+         (str/join "\n" (map #(str "    " (:label %) ": " (:text %)) actions))
+         "\n")))
+
 (defn- render-guidance-report
   [{:keys [path summary blocks examples] :as report}]
   (let [{:keys [file-score
@@ -1084,74 +1246,85 @@
                 actions
                 top-blocks
                 top-examples]} (guidance report)
-        why-section
-        (str "  remediation-mode: " remediation-mode "\n"
-             "  ai-actionability: " ai-actionability "\n"
-             "  ai-guidance: " ai-actionability-message "\n"
-             "  why:\n"
-             "    avg-scrap: " (format "%.1f" (double (or (:avg-scrap summary) 0.0))) "\n"
-             "    max-scrap: " (or (:max-scrap summary) 0) "\n"
-             "    harmful-duplication-score: " (or (:harmful-duplication-score summary) 0) "\n"
-             "    effective-duplication-score: " (or (:effective-duplication-score summary) 0) "\n"
-             "    coverage-matrix-candidates: " (or (:coverage-matrix-candidates summary) 0) "\n"
-             "    case-matrix-repetition: " (or (:case-matrix-repetition summary) 0) "\n"
-             "    subject-repetition-score: " (or (:subject-repetition-score summary) 0) "\n"
-             "    helper-hidden-example-count: " (or (:helper-hidden-example-count summary) 0) "\n"
-             "    low-assertion-ratio: "
-             (format "%.2f" (double (ratio (or (:low-assertion-examples summary) 0)
-                                           (or (:example-count summary) 0))))
-             "\n"
-             "    branching-ratio: "
-             (format "%.2f" (double (ratio (or (:branching-examples summary) 0)
-                                           (or (:example-count summary) 0))))
-             "\n"
-             "    mocking-ratio: "
-             (format "%.2f" (double (ratio (or (:with-redefs-examples summary) 0)
-                                           (or (:example-count summary) 0))))
-             "\n")
-        where-section
-        (when (seq top-blocks)
-          (str "  where:\n"
-               (str/join
-                 "\n"
-                 (for [{:keys [path summary worst-example]} top-blocks]
-                   (str "    "
-                        (str/join " / " path)
-                        " -> "
-                        (pressure-level summary)
-                        ", avg-scrap "
-                        (format "%.1f" (double (round1 (or (:avg-scrap summary) 0.0))))
-                        ", harmful duplication "
-                        (or (:harmful-duplication-score summary) 0)
-                        ", worst "
-                        (:name worst-example)
-                        " (SCRAP " (format "%.1f" (double (round1 (:scrap worst-example)))) ")")))
-               "\n"))
-        worst-section
-        (when (seq top-examples)
-          (str "  worst-examples:\n"
-               (str/join
-                 "\n"
-                 (for [example top-examples]
-                   (str "    "
-                        (str/join " / " (conj (:describe-path example) (:name example)))
-                        " -> SCRAP " (format "%.1f" (double (round1 (:scrap example))))
-                        (when (seq (:smells example))
-                          (str " [" (format-smells (:smells example)) "]")))))
-               "\n"))
-        how-section
-        (when (seq actions)
-          (str "  how:\n"
-               (str/join "\n" (map #(str "    " (:label %) ": " (:text %)) actions))
-               "\n"))]
+        header (str "  remediation-mode: " remediation-mode "\n"
+                    "  ai-actionability: " ai-actionability "\n"
+                    "  ai-guidance: " ai-actionability-message "\n")]
     (str
       path "\n"
       "  refactor-pressure: " file-level " (" (format "%.1f" (double file-score)) ")\n"
-      why-section
+      header
+      (guidance-why-section summary)
       (render-comparison report)
-      where-section
-      worst-section
-      how-section)))
+      (guidance-where-section top-blocks)
+      (guidance-worst-section top-examples)
+      (guidance-how-section actions))))
+
+(defn- verbose-summary-section
+  [summary]
+  (when summary
+    (str "  avg-scrap: " (format "%.1f" (double (or (:avg-scrap summary) 0.0))) "\n"
+         "  max-scrap: " (format "%.1f" (double (round1 (:max-scrap summary)))) "\n"
+         "  branching-examples: " (:branching-examples summary) "/" (:example-count summary) "\n"
+         "  low-assertion-examples: " (:low-assertion-examples summary) "/" (:example-count summary) "\n"
+         "  zero-assertion-examples: " (:zero-assertion-examples summary) "/" (:example-count summary) "\n"
+         "  with-redefs-examples: " (:with-redefs-examples summary) "/" (:example-count summary) "\n"
+         "  duplication-score: " (or (:duplication-score summary) 0) "\n"
+         "  harmful-duplication-score: " (or (:harmful-duplication-score summary) 0) "\n"
+         "  effective-duplication-score: " (or (:effective-duplication-score summary) 0) "\n"
+         "  coverage-matrix-candidates: " (or (:coverage-matrix-candidates summary) 0) "\n"
+         "  case-matrix-repetition: " (or (:case-matrix-repetition summary) 0) "\n"
+         "  subject-repetition-score: " (or (:subject-repetition-score summary) 0) "\n"
+         "  helper-hidden-example-count: " (or (:helper-hidden-example-count summary) 0) "\n"
+         "  setup-duplication-score: " (or (:setup-duplication-score summary) 0) "\n"
+         "  assertion-duplication-score: " (or (:assertion-duplication-score summary) 0) "\n"
+         "  fixture-duplication-score: " (or (:fixture-duplication-score summary) 0) "\n"
+         "  literal-duplication-score: " (or (:literal-duplication-score summary) 0) "\n"
+         "  arrange-duplication-score: " (or (:arrange-duplication-score summary) 0) "\n"
+         "  avg-setup-similarity: " (format "%.2f" (double (or (:avg-setup-similarity summary) 0.0))) "\n"
+         "  avg-assert-similarity: " (format "%.2f" (double (or (:avg-assert-similarity summary) 0.0))) "\n"
+         "  avg-arrange-similarity: " (format "%.2f" (double (or (:avg-arrange-similarity summary) 0.0))) "\n")))
+
+(defn- render-verbose-block
+  [{:keys [path summary worst-example]}]
+  (str "    "
+       (str/join " / " path) "\n"
+       "      examples: " (:example-count summary) "\n"
+       "      avg-scrap: " (format "%.1f" (double (or (:avg-scrap summary) 0.0))) "\n"
+       "      max-scrap: " (format "%.1f" (double (round1 (:max-scrap summary)))) "\n"
+       "      harmful-duplication-score: " (or (:harmful-duplication-score summary) 0) "\n"
+       "      coverage-matrix-candidates: " (or (:coverage-matrix-candidates summary) 0) "\n"
+       "      case-matrix-repetition: " (or (:case-matrix-repetition summary) 0) "\n"
+       "      worst-example: " (:name worst-example) " (SCRAP " (format "%.1f" (double (round1 (:scrap worst-example)))) ")"))
+
+(defn- verbose-blocks-section
+  [blocks]
+  (when (seq blocks)
+    (str "\n  blocks:\n"
+         (str/join "\n" (map render-verbose-block blocks)))))
+
+(defn- render-verbose-example
+  [example]
+  (str "    "
+       (str/join " / " (conj (:describe-path example) (:name example))) "\n"
+       "      SCRAP: " (format "%.1f" (double (round1 (:scrap example)))) "\n"
+       "      complexity: " (or (:complexity example) 0) "\n"
+       "      complexity-score: " (format "%.1f" (double (round1 (or (:complexity-score example) 0.0)))) "\n"
+       "      lines: " (:line-count example) "\n"
+       "      raw-lines: " (or (:raw-line-count example) 0) "\n"
+       "      assertions: " (:assertions example) "\n"
+       "      branches: " (:branches example) "\n"
+       "      setup-depth: " (:setup-depth example) "\n"
+       "      redefs: " (:with-redefs example) "\n"
+       "      helper-calls: " (:helper-calls example) "\n"
+       "      helper-hidden-lines: " (or (:helper-hidden-lines example) 0) "\n"
+       "      table-driven: " (if (:table-driven? example) "yes" "no") "\n"
+       "      smells: " (format-smells (:smells example))))
+
+(defn- verbose-examples-section
+  [examples]
+  (when (seq examples)
+    (str "\n"
+         (str/join "\n" (map render-verbose-example (take 5 (sort-by :scrap > examples)))))))
 
 (defn- render-file-report
   [{:keys [path structure-errors parse-error examples summary blocks] :as report}]
@@ -1164,62 +1337,9 @@
     (when parse-error
       (str "  parse-error: " parse-error "\n"))
     (render-comparison report)
-    (when summary
-      (str "  avg-scrap: " (format "%.1f" (double (or (:avg-scrap summary) 0.0))) "\n"
-           "  max-scrap: " (format "%.1f" (double (round1 (:max-scrap summary)))) "\n"
-           "  branching-examples: " (:branching-examples summary) "/" (:example-count summary) "\n"
-           "  low-assertion-examples: " (:low-assertion-examples summary) "/" (:example-count summary) "\n"
-           "  zero-assertion-examples: " (:zero-assertion-examples summary) "/" (:example-count summary) "\n"
-           "  with-redefs-examples: " (:with-redefs-examples summary) "/" (:example-count summary) "\n"
-           "  duplication-score: " (or (:duplication-score summary) 0) "\n"
-           "  harmful-duplication-score: " (or (:harmful-duplication-score summary) 0) "\n"
-           "  effective-duplication-score: " (or (:effective-duplication-score summary) 0) "\n"
-           "  coverage-matrix-candidates: " (or (:coverage-matrix-candidates summary) 0) "\n"
-           "  case-matrix-repetition: " (or (:case-matrix-repetition summary) 0) "\n"
-           "  subject-repetition-score: " (or (:subject-repetition-score summary) 0) "\n"
-           "  helper-hidden-example-count: " (or (:helper-hidden-example-count summary) 0) "\n"
-           "  setup-duplication-score: " (or (:setup-duplication-score summary) 0) "\n"
-           "  assertion-duplication-score: " (or (:assertion-duplication-score summary) 0) "\n"
-           "  fixture-duplication-score: " (or (:fixture-duplication-score summary) 0) "\n"
-           "  literal-duplication-score: " (or (:literal-duplication-score summary) 0) "\n"
-           "  arrange-duplication-score: " (or (:arrange-duplication-score summary) 0) "\n"
-           "  avg-setup-similarity: " (format "%.2f" (double (or (:avg-setup-similarity summary) 0.0))) "\n"
-           "  avg-assert-similarity: " (format "%.2f" (double (or (:avg-assert-similarity summary) 0.0))) "\n"
-           "  avg-arrange-similarity: " (format "%.2f" (double (or (:avg-arrange-similarity summary) 0.0))) "\n"))
-    (when (seq blocks)
-      (str "\n  blocks:\n"
-           (str/join
-             "\n"
-             (for [{:keys [path summary worst-example]} blocks]
-               (str "    "
-                    (str/join " / " path) "\n"
-                    "      examples: " (:example-count summary) "\n"
-                    "      avg-scrap: " (format "%.1f" (double (or (:avg-scrap summary) 0.0))) "\n"
-                    "      max-scrap: " (format "%.1f" (double (round1 (:max-scrap summary)))) "\n"
-                    "      harmful-duplication-score: " (or (:harmful-duplication-score summary) 0) "\n"
-                    "      coverage-matrix-candidates: " (or (:coverage-matrix-candidates summary) 0) "\n"
-                    "      case-matrix-repetition: " (or (:case-matrix-repetition summary) 0) "\n"
-                    "      worst-example: " (:name worst-example) " (SCRAP " (format "%.1f" (double (round1 (:scrap worst-example)))) ")")))))
-    (when (seq examples)
-      (str "\n"
-           (str/join
-             "\n"
-             (for [example (take 5 (sort-by :scrap > examples))]
-               (str "    "
-                    (str/join " / " (conj (:describe-path example) (:name example))) "\n"
-                    "      SCRAP: " (format "%.1f" (double (round1 (:scrap example)))) "\n"
-                    "      complexity: " (or (:complexity example) 0) "\n"
-                    "      complexity-score: " (format "%.1f" (double (round1 (or (:complexity-score example) 0.0)))) "\n"
-                    "      lines: " (:line-count example) "\n"
-                    "      raw-lines: " (or (:raw-line-count example) 0) "\n"
-                    "      assertions: " (:assertions example) "\n"
-                    "      branches: " (:branches example) "\n"
-                    "      setup-depth: " (:setup-depth example) "\n"
-                    "      redefs: " (:with-redefs example) "\n"
-                    "      helper-calls: " (:helper-calls example) "\n"
-                    "      helper-hidden-lines: " (or (:helper-hidden-lines example) 0) "\n"
-                    "      table-driven: " (if (:table-driven? example) "yes" "no") "\n"
-                    "      smells: " (format-smells (:smells example)))))))))
+    (verbose-summary-section summary)
+    (verbose-blocks-section blocks)
+    (verbose-examples-section examples)))
 
 (defn render-report
   [file-reports verbose?]
