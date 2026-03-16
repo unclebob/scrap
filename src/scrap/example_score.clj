@@ -58,3 +58,7 @@
      :literal-features literal-features
      :scrap scrap
      :smells (mapv :label smell-entries)}))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:54:26.330402-05:00", :module-hash "-823108568", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 7, :hash "-2008187630"} {:id "defn/score-example", :kind "defn", :line 9, :end-line 60, :hash "-1175225563"}]}
+;; clj-mutate-manifest-end

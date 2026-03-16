@@ -40,3 +40,7 @@
     (if api-contract?
       (max 0 (- branch-penalty 2))
       branch-penalty)))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:48:01.780357-05:00", :module-hash "1095064886", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "740668023"} {:id "defn/saturating-complexity-score", :kind "defn", :line 5, :end-line 13, :hash "623672219"} {:id "defn/api-contract-example?", :kind "defn", :line 15, :end-line 27, :hash "-268962645"} {:id "defn/scored-setup-depth", :kind "defn", :line 29, :end-line 33, :hash "-217133315"} {:id "defn/scored-branch-penalty", :kind "defn", :line 35, :end-line 42, :hash "-356787910"}]}
+;; clj-mutate-manifest-end

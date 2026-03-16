@@ -58,3 +58,7 @@
 (defn setup-forms
   [forms]
   (filterv #(contains? shared/setup-heads (seq-head %)) forms))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:59:29.483691-05:00", :module-hash "907324294", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "-1539827596"} {:id "defn/seq-head", :kind "defn", :line 5, :end-line 7, :hash "-1387101079"} {:id "defn-/symbol-name", :kind "defn-", :line 9, :end-line 11, :hash "-350616189"} {:id "defn/namespaced-symbol?", :kind "defn", :line 13, :end-line 15, :hash "1386266118"} {:id "defn/large-literal?", :kind "defn", :line 17, :end-line 22, :hash "-404200277"} {:id "defn/temp-resource-call?", :kind "defn", :line 24, :end-line 29, :hash "-958219488"} {:id "defn/control-symbol?", :kind "defn", :line 31, :end-line 42, :hash "1389660570"} {:id "defn/large-case-table?", :kind "defn", :line 44, :end-line 48, :hash "-1476672665"} {:id "defn/child-nodes", :kind "defn", :line 50, :end-line 56, :hash "1447842744"} {:id "defn/setup-forms", :kind "defn", :line 58, :end-line 60, :hash "-408533626"}]}
+;; clj-mutate-manifest-end

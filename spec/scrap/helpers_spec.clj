@@ -6,11 +6,14 @@
             [scrap.actionability-rules :as actionability-rules]
             [scrap.cli :as cli]
             [scrap.comparison :as comparison]
+            [scrap.example-helpers :as example-helpers]
+            [scrap.example-node :as example-node]
             [scrap.example-smells :as example-smells]
             [scrap.pressure-mode :as pressure-mode]
             [scrap.pressure-score :as pressure-score]
             [scrap.pressure-stability :as pressure-stability]
             [scrap.report :as report]
+            [scrap.report-summary :as report-summary]
             [scrap.scan :as scan]
             [scrap.scan-tokenize :as scan-tokenize]
             [speclj.core :refer :all]))
@@ -154,7 +157,21 @@
     (should= "LOCAL"
              (pressure-mode/remediation-mode
                {:example-count 6 :avg-scrap 4 :max-scrap 13}
-               []))))
+               [])))
+
+  (it "detects split triggers and block-driven split pressure"
+    (should (#'pressure-mode/split-pressure? {:avg-scrap 10}))
+    (should (#'pressure-mode/split-pressure? {:effective-duplication-score 20}))
+    (should (#'pressure-mode/split-pressure? {:subject-repetition-score 12}))
+    (should (#'pressure-mode/split-pressure? {:helper-hidden-example-count 1}))
+    (should= "SPLIT"
+             (pressure-mode/remediation-mode
+               {:example-count 12
+                :avg-scrap 10
+                :max-scrap 20
+                :effective-duplication-score 0}
+               [{:summary {:example-count 3 :avg-scrap 30 :max-scrap 30}}
+                {:summary {:example-count 3 :avg-scrap 30 :max-scrap 30}}]))))
 
 (describe "comparison"
   (it "reports improved, worse, unchanged, mixed, and missing baselines"
@@ -180,7 +197,48 @@
       (should= :worse (get-in (nth compared 1) [:comparison :verdict]))
       (should= :unchanged (get-in (nth compared 2) [:comparison :verdict]))
       (should= :mixed (get-in (nth compared 3) [:comparison :verdict]))
-      (should= nil (:comparison (nth compared 4))))))
+      (should= nil (:comparison (nth compared 4)))))
+
+  (it "recognizes helper regressions and worsening comparisons directly"
+    (should (#'comparison/helper-regression?
+              {:helper-hidden-delta 1
+               :harmful-duplication-delta 0
+               :case-matrix-delta 0}))
+    (should (#'comparison/worsening-comparison?
+              {:harmful-duplication-delta 0
+               :max-scrap-delta 1
+               :file-score-delta 0}))
+    (should= :worse
+             (#'comparison/verdict
+               {:file-score-delta 0
+                :harmful-duplication-delta 0
+                :max-scrap-delta 0
+                :helper-hidden-delta 1
+                :case-matrix-delta 0})))
+
+  (it "treats helper-hidden growth as a worse public comparison when other deltas stay flat"
+    (let [baseline {:reports [{:path "spec/helper_spec.clj"
+                               :content-hash "h1"
+                               :summary {:example-count 4
+                                         :avg-scrap 10
+                                         :max-scrap 10
+                                         :harmful-duplication-score 1
+                                         :case-matrix-repetition 0
+                                         :helper-hidden-example-count 0}}]}
+          reports [{:path "spec/helper_spec.clj"
+                    :content-hash "h2"
+                    :summary {:example-count 4
+                              :avg-scrap 10
+                              :max-scrap 10
+                              :harmful-duplication-score 1
+                              :case-matrix-repetition 0
+                              :helper-hidden-example-count 1}}]
+          comparison (:comparison (first (comparison/compare-reports baseline reports)))]
+      (should= 1 (:helper-hidden-delta comparison))
+      (should= 0 (:harmful-duplication-delta comparison))
+      (should= 0 (:case-matrix-delta comparison))
+      (should (< 0 (:file-score-delta comparison)))
+      (should= :worse (:verdict comparison)))))
 
 (describe "cli"
   (it "parses args and sanitizes baseline output paths"
@@ -246,6 +304,42 @@
                 "helper-hidden-complexity"]
                (mapv :label entries)))))
 
+(describe "example-node"
+  (it "reuses cached helper metrics and classifies top-level forms"
+    (let [helper-defs {'helper ['(should= 1 1)]}
+          helper-cache (atom {})
+          helper-context {:helper-defs helper-defs
+                          :helper-cache helper-cache}
+          first-metrics (example-node/helper-expanded-metrics helper-context 'helper #{} 0)
+          second-metrics (example-node/helper-expanded-metrics helper-context 'helper #{} 0)]
+      (should= first-metrics second-metrics)
+      (should= 1 (count @helper-cache))
+      (should= :setup (example-node/top-level-phase '(before (reset! state 1)) helper-context))
+      (should= :action (example-node/top-level-phase '(println "x") helper-context))
+      (should= 1 (example-node/assertion-clusters ['(should= 1 1) '(should= 2 2)] helper-context))))
+
+  (it "marks table-driven forms under branch heads when a large case table is present"
+    (let [expr '(doseq [[input expected] [[1 1] [2 2]]]
+                  (should= expected input))
+          metrics (example-node/analyze-node expr {:helper-defs {} :helper-cache (atom {})} 0 #{})]
+      (should (:table-driven? metrics))
+      (should= 1 (:table-branches metrics))))
+
+  (it "tracks helper-hidden metrics for helper calls"
+    (let [helper-context (example-helpers/helper-context
+                           ['(defn helper []
+                               (should= 1 1))
+                            '(helper)])
+          metrics (example-node/analyze-node '(helper) helper-context 0 #{})]
+      (should= 1 (:helper-calls metrics))
+      (should (< 0 (:helper-hidden-lines metrics)))))
+
+  (it "returns zero hidden lines when a helper body is missing"
+    (let [helper-context {:helper-defs {}
+                          :helper-cache (atom {})}
+          metrics (example-node/helper-expanded-metrics helper-context 'missing-helper #{} 0)]
+      (should= {:helper-hidden-lines 0} metrics))))
+
 (describe "report"
   (it "renders guidance reports with comparison details"
     (with-redefs [scrap.guidance/guidance (fn [_]
@@ -278,6 +372,13 @@
         (should-contain "where:" output)
         (should-contain "worst-examples:" output)
         (should-contain "how:" output))))
+
+  (it "renders summary helper sections"
+    (let [why-output (report-summary/guidance-why-section rich-summary)
+          verbose-output (report-summary/verbose-summary-section rich-summary)]
+      (should-contain "low-assertion-ratio" why-output)
+      (should-contain "branching-examples: 2/6" verbose-output)
+      (should-contain "avg-arrange-similarity: 0.20" verbose-output)))
 
   (it "renders verbose reports and json payloads"
     (let [output (report/render-report

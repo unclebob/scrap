@@ -35,3 +35,7 @@
      :actions (vec (take 4 actions))
      :top-blocks (vec (take shared/default-top-block-count sorted-blocks))
      :top-examples (vec (take shared/default-top-example-count sorted-examples))}))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:38:15.626955-05:00", :module-hash "1827921105", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 5, :hash "1342746636"} {:id "defn/guidance", :kind "defn", :line 7, :end-line 37, :hash "-1971073862"}]}
+;; clj-mutate-manifest-end

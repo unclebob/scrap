@@ -2,6 +2,7 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [scrap.guidance :as guidance]
+            [scrap.report-summary :as report-summary]
             [scrap.shared :as shared]))
 
 (defn- round1
@@ -27,75 +28,6 @@
          "    helper-hidden-delta: " (:helper-hidden-delta comparison) "\n"
          (when (= :worse (:verdict comparison))
            "    recommendation: Refactor appears negative; consider reverting or simplifying helper extraction.\n"))))
-
-(defn- summary-ratio-lines
-  [summary]
-  [["low-assertion-ratio" (format "%.2f" (double (guidance/ratio (or (:low-assertion-examples summary) 0)
-                                                                (or (:example-count summary) 0))))]
-   ["branching-ratio" (format "%.2f" (double (guidance/ratio (or (:branching-examples summary) 0)
-                                                            (or (:example-count summary) 0))))]
-   ["mocking-ratio" (format "%.2f" (double (guidance/ratio (or (:with-redefs-examples summary) 0)
-                                                          (or (:example-count summary) 0))))]])
-
-(defn- render-summary-lines
-  [lines indent]
-  (str/join "\n" (map (fn [[label value]] (str indent label ": " value)) lines)))
-
-(defn- metric-line
-  [summary {:keys [label key default formatter value-fn]}]
-  (let [value (if value-fn
-                (value-fn summary)
-                (or (get summary key) default))]
-    [label ((or formatter str) value)]))
-
-(def why-line-specs
-  [{:label "avg-scrap" :formatter #(format "%.1f" (double (or % 0.0))) :value-fn :avg-scrap}
-   {:label "max-scrap" :key :max-scrap :default 0}
-   {:label "harmful-duplication-score" :key :harmful-duplication-score :default 0}
-   {:label "effective-duplication-score" :key :effective-duplication-score :default 0}
-   {:label "coverage-matrix-candidates" :key :coverage-matrix-candidates :default 0}
-   {:label "case-matrix-repetition" :key :case-matrix-repetition :default 0}
-   {:label "subject-repetition-score" :key :subject-repetition-score :default 0}
-   {:label "helper-hidden-example-count" :key :helper-hidden-example-count :default 0}])
-
-(def verbose-line-specs
-  [{:label "avg-scrap" :formatter #(format "%.1f" (double (or % 0.0))) :value-fn :avg-scrap}
-   {:label "max-scrap" :formatter #(format "%.1f" (double (round1 %))) :value-fn #(or (:max-scrap %) 0)}
-   {:label "branching-examples" :value-fn #(str (:branching-examples %) "/" (:example-count %))}
-   {:label "low-assertion-examples" :value-fn #(str (:low-assertion-examples %) "/" (:example-count %))}
-   {:label "zero-assertion-examples" :value-fn #(str (:zero-assertion-examples %) "/" (:example-count %))}
-   {:label "with-redefs-examples" :value-fn #(str (:with-redefs-examples %) "/" (:example-count %))}
-   {:label "duplication-score" :key :duplication-score :default 0}
-   {:label "harmful-duplication-score" :key :harmful-duplication-score :default 0}
-   {:label "effective-duplication-score" :key :effective-duplication-score :default 0}
-   {:label "coverage-matrix-candidates" :key :coverage-matrix-candidates :default 0}
-   {:label "case-matrix-repetition" :key :case-matrix-repetition :default 0}
-   {:label "subject-repetition-score" :key :subject-repetition-score :default 0}
-   {:label "helper-hidden-example-count" :key :helper-hidden-example-count :default 0}
-   {:label "setup-duplication-score" :key :setup-duplication-score :default 0}
-   {:label "assertion-duplication-score" :key :assertion-duplication-score :default 0}
-   {:label "fixture-duplication-score" :key :fixture-duplication-score :default 0}
-   {:label "literal-duplication-score" :key :literal-duplication-score :default 0}
-   {:label "arrange-duplication-score" :key :arrange-duplication-score :default 0}
-   {:label "avg-setup-similarity" :formatter #(format "%.2f" (double (or % 0.0))) :value-fn :avg-setup-similarity}
-   {:label "avg-assert-similarity" :formatter #(format "%.2f" (double (or % 0.0))) :value-fn :avg-assert-similarity}
-   {:label "avg-arrange-similarity" :formatter #(format "%.2f" (double (or % 0.0))) :value-fn :avg-arrange-similarity}])
-
-(defn- metric-lines
-  [summary specs]
-  (mapv #(metric-line summary %) specs))
-
-(defn- guidance-why-section
-  [summary]
-  (let [base-lines (metric-lines summary why-line-specs)
-        lines (concat base-lines (summary-ratio-lines summary))]
-    (str "  why:\n"
-         (render-summary-lines lines "    ")
-         "\n")))
-
-(defn- verbose-summary-lines
-  [summary]
-  (metric-lines summary verbose-line-specs))
 
 (defn- render-top-block
   [{:keys [path summary worst-example]}]
@@ -157,17 +89,11 @@
     (str path "\n"
          "  refactor-pressure: " file-level " (" (format "%.1f" (double file-score)) ")\n"
          header
-         (guidance-why-section summary)
+         (report-summary/guidance-why-section summary)
          (render-comparison report)
          (guidance-where-section top-blocks)
          (guidance-worst-section top-examples)
          (guidance-how-section actions))))
-
-(defn- verbose-summary-section
-  [summary]
-  (when summary
-    (str (render-summary-lines (verbose-summary-lines summary) "  ")
-         "\n")))
 
 (defn- render-verbose-block
   [{:keys [path summary worst-example]}]
@@ -221,7 +147,7 @@
        (when parse-error
          (str "  parse-error: " parse-error "\n"))
        (render-comparison report)
-       (verbose-summary-section summary)
+       (report-summary/verbose-summary-section summary)
        (verbose-blocks-section blocks)
        (verbose-examples-section examples)))
 
@@ -252,3 +178,7 @@
     {:baseline-version shared/baseline-version
      :paths (vec paths)
      :reports reports}))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T09:22:41.568368-05:00", :module-hash "1165194229", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 6, :hash "980190637"} {:id "defn-/round1", :kind "defn-", :line 8, :end-line 10, :hash "991386479"} {:id "defn-/format-smells", :kind "defn-", :line 12, :end-line 16, :hash "-1571160262"} {:id "defn-/render-comparison", :kind "defn-", :line 18, :end-line 30, :hash "1317457391"} {:id "defn-/render-top-block", :kind "defn-", :line 32, :end-line 44, :hash "-2093400885"} {:id "defn-/guidance-where-section", :kind "defn-", :line 46, :end-line 51, :hash "814006351"} {:id "defn-/render-top-example", :kind "defn-", :line 53, :end-line 59, :hash "-604010348"} {:id "defn-/guidance-worst-section", :kind "defn-", :line 61, :end-line 66, :hash "-869739732"} {:id "defn-/guidance-how-section", :kind "defn-", :line 68, :end-line 73, :hash "-2046202976"} {:id "defn-/render-guidance-report", :kind "defn-", :line 75, :end-line 96, :hash "-1700682112"} {:id "defn-/render-verbose-block", :kind "defn-", :line 98, :end-line 108, :hash "-1870139994"} {:id "defn-/verbose-blocks-section", :kind "defn-", :line 110, :end-line 114, :hash "-1125870309"} {:id "defn-/render-verbose-example", :kind "defn-", :line 116, :end-line 132, :hash "276516332"} {:id "defn-/verbose-examples-section", :kind "defn-", :line 134, :end-line 138, :hash "-2016491541"} {:id "defn-/render-file-report", :kind "defn-", :line 140, :end-line 152, :hash "-1793687341"} {:id "defn/render-report", :kind "defn", :line 154, :end-line 173, :hash "331681477"} {:id "defn/render-json", :kind "defn", :line 175, :end-line 180, :hash "-1763666260"}]}
+;; clj-mutate-manifest-end

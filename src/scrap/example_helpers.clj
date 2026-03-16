@@ -68,3 +68,7 @@
   [forms]
   {:helper-defs (collect-helper-defs forms)
    :helper-cache (atom {})})
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:44:53.501958-05:00", :module-hash "-2091462562", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 4, :hash "1373574255"} {:id "defn/combine-metrics", :kind "defn", :line 6, :end-line 32, :hash "-2124346031"} {:id "defn/non-helper-body", :kind "defn", :line 34, :end-line 40, :hash "1895224410"} {:id "defn-/collect-helper-defs", :kind "defn-", :line 42, :end-line 55, :hash "1710177796"} {:id "defn/helper-line-span", :kind "defn", :line 57, :end-line 65, :hash "-1862571045"} {:id "defn/helper-context", :kind "defn", :line 67, :end-line 70, :hash "7931837"}]}
+;; clj-mutate-manifest-end

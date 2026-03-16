@@ -23,3 +23,7 @@
                         :else [])))
                   forms)))]
       (walk forms [] []))))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:44:32.213927-05:00", :module-hash "-2041924587", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 4, :hash "-444734460"} {:id "defn/collect-examples", :kind "defn", :line 6, :end-line 25, :hash "555908238"}]}
+;; clj-mutate-manifest-end

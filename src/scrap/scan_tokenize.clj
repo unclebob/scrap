@@ -48,3 +48,7 @@
                         (range start n))]
         (when (> end start)
           (apply str (subvec chars start end)))))))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T09:28:09.525033-05:00", :module-hash "1349267512", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 1, :hash "1158996254"} {:id "defn-/process-quoted-char", :kind "defn-", :line 3, :end-line 9, :hash "261889984"} {:id "defn-/process-normal-char", :kind "defn-", :line 11, :end-line 21, :hash "1652627660"} {:id "defn/process-char", :kind "defn", :line 23, :end-line 34, :hash "685885996"} {:id "def/token-delimiters", :kind "def", :line 36, :end-line 36, :hash "1843939576"} {:id "defn/extract-token", :kind "defn", :line 38, :end-line 50, :hash "1230788345"}]}
+;; clj-mutate-manifest-end

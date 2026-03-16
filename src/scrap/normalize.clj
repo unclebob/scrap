@@ -71,3 +71,7 @@
 (defn form-features
   [forms]
   (apply set/union #{} (map shape-features forms)))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T09:01:43.809872-05:00", :module-hash "343609242", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "-566558681"} {:id "form/1/declare", :kind "declare", :line 5, :end-line 5, :hash "775804283"} {:id "defn-/normalized-map-shape", :kind "defn-", :line 7, :end-line 13, :hash "1875433455"} {:id "def/scalar-normalizers", :kind "def", :line 15, :end-line 22, :hash "1563872621"} {:id "defn-/normalize-scalar", :kind "defn-", :line 24, :end-line 30, :hash "1400165704"} {:id "defn/normalize-shape", :kind "defn", :line 32, :end-line 39, :hash "541171636"} {:id "defn/shape-signature", :kind "defn", :line 41, :end-line 43, :hash "2002971417"} {:id "defn/shape-features", :kind "defn", :line 45, :end-line 54, :hash "770598821"} {:id "defn/collect-large-literal-signatures", :kind "defn", :line 56, :end-line 65, :hash "-304159590"} {:id "defn/form-signatures", :kind "defn", :line 67, :end-line 69, :hash "589119540"} {:id "defn/form-features", :kind "defn", :line 71, :end-line 73, :hash "-2143902625"}]}
+;; clj-mutate-manifest-end

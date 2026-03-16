@@ -100,3 +100,7 @@
        (partition-by identity)
        (filter #(= :assert (first %)))
        count))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T12:43:42.060406-05:00", :module-hash "-215389743", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 4, :hash "1360096345"} {:id "form/1/declare", :kind "declare", :line 6, :end-line 6, :hash "965093159"} {:id "form/2/declare", :kind "declare", :line 7, :end-line 7, :hash "-1843973544"} {:id "defn-/table-driven-form?", :kind "defn-", :line 9, :end-line 17, :hash "1502704975"} {:id "defn-/helper-call?", :kind "defn-", :line 19, :end-line 21, :hash "1712982202"} {:id "defn-/next-setup-depth", :kind "defn-", :line 23, :end-line 27, :hash "544093126"} {:id "defn-/subject-symbols-for-head", :kind "defn-", :line 29, :end-line 37, :hash "-255465277"} {:id "defn-/local-node-metrics", :kind "defn-", :line 39, :end-line 51, :hash "-1379812821"} {:id "defn/analyze-node", :kind "defn", :line 53, :end-line 64, :hash "-1005369280"} {:id "defn/helper-expanded-metrics", :kind "defn", :line 66, :end-line 77, :hash "1460191526"} {:id "defn/top-level-phase", :kind "defn", :line 79, :end-line 86, :hash "-400587275"} {:id "defn/assert-forms", :kind "defn", :line 88, :end-line 90, :hash "1987593646"} {:id "defn/arrange-forms", :kind "defn", :line 92, :end-line 94, :hash "-159961892"} {:id "defn/assertion-clusters", :kind "defn", :line 96, :end-line 102, :hash "-416831686"}]}
+;; clj-mutate-manifest-end

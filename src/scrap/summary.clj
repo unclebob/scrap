@@ -151,3 +151,7 @@
        (sort-by (fn [{:keys [path]}]
                   [(count path) (str/join " / " path)]))
        vec))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T09:30:45.050216-05:00", :module-hash "1424249917", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 4, :hash "-707320190"} {:id "defn-/jaccard-similarity", :kind "defn-", :line 6, :end-line 14, :hash "716462559"} {:id "defn-/similar-example-count", :kind "defn-", :line 16, :end-line 25, :hash "-1313986130"} {:id "defn-/average-similarity", :kind "defn-", :line 27, :end-line 34, :hash "111179513"} {:id "defn-/distinct-shape-count", :kind "defn-", :line 36, :end-line 38, :hash "-237489396"} {:id "defn-/coverage-matrix-candidate?", :kind "defn-", :line 40, :end-line 53, :hash "-1638169936"} {:id "defn-/similar-to-any?", :kind "defn-", :line 55, :end-line 60, :hash "-160735713"} {:id "defn-/coverage-matrix-count", :kind "defn-", :line 62, :end-line 72, :hash "770069941"} {:id "defn-/summarize-duplication", :kind "defn-", :line 74, :end-line 110, :hash "1875043843"} {:id "defn/summarize-examples", :kind "defn", :line 112, :end-line 140, :hash "-1890130707"} {:id "defn/summarize-blocks", :kind "defn", :line 142, :end-line 153, :hash "-880966090"}]}
+;; clj-mutate-manifest-end

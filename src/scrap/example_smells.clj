@@ -19,3 +19,7 @@
         (smell-rule (> (:helper-hidden-lines metrics) 8) "helper-hidden-complexity" 4)]
        (remove nil?)
        vec))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:57:23.858646-05:00", :module-hash "304074667", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 1, :hash "1894027595"} {:id "defn-/smell-rule", :kind "defn-", :line 3, :end-line 6, :hash "1456997993"} {:id "defn/smell-entries", :kind "defn", :line 8, :end-line 21, :hash "-633444422"}]}
+;; clj-mutate-manifest-end

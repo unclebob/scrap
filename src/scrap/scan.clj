@@ -45,3 +45,7 @@
         init {:mode :normal :depth 0 :line 1 :escape false :skip false :errors [] :form-stack []}
         result (reduce (scan-char-step chars n) init (range n))]
     (into (:errors result) (nesting/unclosed-errors result))))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T09:26:36.032993-05:00", :module-hash "-762883158", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 4, :hash "-528904454"} {:id "defn-/open-form-state", :kind "defn-", :line 6, :end-line 13, :hash "1750385797"} {:id "defn-/closing-form?", :kind "defn-", :line 15, :end-line 21, :hash "1029542849"} {:id "defn-/scan-char-step", :kind "defn-", :line 23, :end-line 39, :hash "1880255071"} {:id "defn/scan-structure", :kind "defn", :line 41, :end-line 47, :hash "2090011926"}]}
+;; clj-mutate-manifest-end

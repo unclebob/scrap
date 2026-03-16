@@ -57,3 +57,7 @@
                              (assoc cmp :verdict (verdict cmp))))]
           (assoc report :comparison comparison)))
       reports)))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T09:46:50.10318-05:00", :module-hash "-584508712", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 2, :hash "1627856145"} {:id "defn-/delta", :kind "defn-", :line 4, :end-line 6, :hash "1353036513"} {:id "defn-/improved-comparison?", :kind "defn-", :line 8, :end-line 12, :hash "-1969635699"} {:id "defn-/helper-regression?", :kind "defn-", :line 14, :end-line 18, :hash "-833001903"} {:id "defn-/worsening-comparison?", :kind "defn-", :line 20, :end-line 24, :hash "-1963076733"} {:id "defn-/verdict", :kind "defn-", :line 26, :end-line 33, :hash "185334716"} {:id "defn/compare-reports", :kind "defn", :line 35, :end-line 59, :hash "-2142205739"}]}
+;; clj-mutate-manifest-end

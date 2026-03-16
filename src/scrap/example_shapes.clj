@@ -26,3 +26,7 @@
      :fixture-features (if (seq setup-signatures)
                         (normalize/shape-features setup-signatures)
                         #{})}))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:56:10.65865-05:00", :module-hash "1776811884", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 4, :hash "-769411365"} {:id "defn/raw-line-count", :kind "defn", :line 6, :end-line 9, :hash "1005898367"} {:id "defn/example-form-shapes", :kind "defn", :line 11, :end-line 28, :hash "-540858122"}]}
+;; clj-mutate-manifest-end

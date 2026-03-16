@@ -85,3 +85,7 @@
           (write-baseline! baseline-path baseline-doc))
         {:exit-code (if has-errors? 1 0)
          :stdout stdout}))))
+
+;; clj-mutate-manifest-begin
+;; {:version 1, :tested-at "2026-03-16T08:41:34.650783-05:00", :module-hash "1247127507", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 6, :hash "-1493684515"} {:id "defn-/baseline-output-path", :kind "defn-", :line 8, :end-line 15, :hash "96503034"} {:id "defn-/write-baseline!", :kind "defn-", :line 17, :end-line 21, :hash "-2065501155"} {:id "defn-/read-json-file", :kind "defn-", :line 23, :end-line 25, :hash "-1558364746"} {:id "defn-/apply-arg", :kind "defn-", :line 27, :end-line 36, :hash "1385101726"} {:id "defn-/parse-args", :kind "defn-", :line 38, :end-line 50, :hash "1643375949"} {:id "defn/usage", :kind "defn", :line 52, :end-line 62, :hash "251944132"} {:id "defn/run-cli", :kind "defn", :line 64, :end-line 87, :hash "1532125660"}]}
+;; clj-mutate-manifest-end
