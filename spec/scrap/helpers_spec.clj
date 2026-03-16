@@ -42,6 +42,53 @@
    :avg-assert-similarity 0.3
    :avg-arrange-similarity 0.2})
 
+(def cli-compare-stub
+  {:verdict :mixed
+   :file-score-delta -1.0
+   :avg-scrap-delta -1.0
+   :max-scrap-delta -1
+   :harmful-duplication-delta 0
+   :case-matrix-delta 0
+   :helper-hidden-delta 0})
+
+(def report-guidance-result
+  {:file-score 42.5
+   :file-level "HIGH"
+   :remediation-mode "LOCAL"
+   :ai-actionability "AUTO_REFACTOR"
+   :ai-actionability-message "Tighten the examples."
+   :actions [{:label "HIGH" :text "Strengthen assertions first."}]
+   :top-blocks [{:path ["alpha"]
+                 :summary {:avg-scrap 18 :harmful-duplication-score 3}
+                 :worst-example {:name "case 1" :scrap 22}}]
+   :top-examples [{:describe-path ["alpha"] :name "case 1" :scrap 22 :smells ["multiple-phases"]}]})
+
+(def report-comparison
+  {:verdict :mixed
+   :file-score-delta -1.0
+   :avg-scrap-delta -1.0
+   :max-scrap-delta -1
+   :harmful-duplication-delta 0
+   :case-matrix-delta 0
+   :helper-hidden-delta 0})
+
+(def report-example
+  {:describe-path ["suite"]
+   :name "slow case"
+   :scrap 20
+   :complexity 6
+   :complexity-score 7.5
+   :line-count 12
+   :raw-line-count 14
+   :assertions 1
+   :branches 2
+   :setup-depth 3
+   :with-redefs 1
+   :helper-calls 2
+   :helper-hidden-lines 3
+   :table-driven? false
+   :smells ["multiple-phases"]})
+
 (describe "actionability-modes"
   (it "classifies stable, matrix, local, split, and review-first summaries"
     (should= "LEAVE_ALONE"
@@ -257,30 +304,33 @@
       (should= 0 (:exit-code result))
       (should-contain "Usage: clj -M:scrap" (:stdout result))))
 
-  (it "writes baselines and renders json output for analyzed files"
-    (let [baseline-file (java.io.File/createTempFile "scrap-baseline" ".json")
-          _ (spit baseline-file (json/write-str {:reports [{:path "spec/a_spec.clj" :content-hash "old" :summary {:example-count 1}}]}))
-          target-file (java.io.File. "target/scrap/spec_custom.json")]
-      (when (.exists target-file)
-        (.delete target-file))
+  (it "renders json output for analyzed files"
+    (with-redefs [scrap.analyze/collect-spec-files (fn [_] ["spec/custom"])
+                  scrap.analyze/analyze-file (fn [path] {:path path :content-hash "new" :summary {:example-count 1}})
+                  scrap.analyze/baseline-document (fn [paths reports] {:paths paths :reports reports})
+                  scrap.guidance/compare-reports (fn [_ reports] (mapv #(assoc % :comparison cli-compare-stub) reports))
+                  scrap.report/render-json (fn [_ reports] (json/write-str {:count (count reports)}))
+                  scrap.cli/read-json-file (fn [_] {:reports [{:path "spec/a_spec.clj" :content-hash "old" :summary {:example-count 1}}]})
+                  scrap.cli/write-baseline! (fn [path _] path)]
+      (let [result (cli/run-cli ["spec/custom" "--json" "--write-baseline" "--compare" "baseline.json"])]
+          (should= 0 (:exit-code result))
+          (should-contain "\"count\":1" (:stdout result)))))
+
+  (it "writes a baseline file when requested"
+    (let [written-path (atom nil)]
       (with-redefs [scrap.analyze/collect-spec-files (fn [_] ["spec/custom"])
                     scrap.analyze/analyze-file (fn [path] {:path path :content-hash "new" :summary {:example-count 1}})
                     scrap.analyze/baseline-document (fn [paths reports] {:paths paths :reports reports})
-                    scrap.guidance/compare-reports (fn [_ reports]
-                                                     (mapv #(assoc % :comparison {:verdict :mixed
-                                                                                  :file-score-delta -1.0
-                                                                                  :avg-scrap-delta -1.0
-                                                                                  :max-scrap-delta -1
-                                                                                  :harmful-duplication-delta 0
-                                                                                  :case-matrix-delta 0
-                                                                                  :helper-hidden-delta 0}) reports))
-                    scrap.report/render-json (fn [_ reports] (json/write-str {:count (count reports)}))]
-        (let [result (cli/run-cli ["spec/custom" "--json" "--write-baseline" "--compare" (.getPath baseline-file)])]
+                    scrap.guidance/compare-reports (fn [_ reports] (mapv #(assoc % :comparison cli-compare-stub) reports))
+                    scrap.report/render-json (fn [_ reports] (json/write-str {:count (count reports)}))
+                    scrap.cli/read-json-file (fn [_] {:reports [{:path "spec/a_spec.clj" :content-hash "old" :summary {:example-count 1}}]})
+                    scrap.cli/write-baseline! (fn [path _]
+                                                (reset! written-path path)
+                                                path)]
+        (let [result (cli/run-cli ["spec/custom" "--json" "--write-baseline" "--compare" "baseline.json"])]
           (should= 0 (:exit-code result))
-          (should-contain "\"count\":1" (:stdout result))
           (should-contain "Baseline written: target/scrap/spec_custom.json" (:stdout result))
-          (should (.exists target-file))))
-      (.delete baseline-file))))
+          (should= "target/scrap/spec_custom.json" @written-path))))))
 
 (describe "example-smells"
   (it "returns the expected smell entries for strong and weak examples"
@@ -341,18 +391,9 @@
       (should= {:helper-hidden-lines 0} metrics))))
 
 (describe "report"
-  (it "renders guidance reports with comparison details"
+  (it "renders comparison sections in guidance reports"
     (with-redefs [scrap.guidance/guidance (fn [_]
-                                            {:file-score 42.5
-                                             :file-level "HIGH"
-                                             :remediation-mode "LOCAL"
-                                             :ai-actionability "AUTO_REFACTOR"
-                                             :ai-actionability-message "Tighten the examples."
-                                             :actions [{:label "HIGH" :text "Strengthen assertions first."}]
-                                             :top-blocks [{:path ["alpha"]
-                                                           :summary {:avg-scrap 18 :harmful-duplication-score 3}
-                                                           :worst-example {:name "case 1" :scrap 22}}]
-                                             :top-examples [{:describe-path ["alpha"] :name "case 1" :scrap 22 :smells ["multiple-phases"]}]})
+                                            report-guidance-result)
                 scrap.guidance/pressure-level (fn [_] "HIGH")
                 scrap.guidance/ratio (fn [n d] (if (pos? d) (/ n d) 0.0))]
       (let [output (report/render-report
@@ -368,10 +409,45 @@
                      false)]
         (should-contain "comparison:" output)
         (should-contain "recommendation: Refactor appears negative" output)
-        (should-contain "why:" output)
+        (should-contain "why:" output))))
+
+  (it "renders location sections in guidance reports"
+    (with-redefs [scrap.guidance/guidance (fn [_]
+                                            report-guidance-result)
+                scrap.guidance/pressure-level (fn [_] "HIGH")
+                scrap.guidance/ratio (fn [n d] (if (pos? d) (/ n d) 0.0))]
+      (let [output (report/render-report
+                     [{:path "spec/a_spec.clj"
+                       :summary rich-summary
+                       :comparison {:verdict :worse
+                                    :file-score-delta 2.0
+                                    :avg-scrap-delta 1.0
+                                    :max-scrap-delta 2
+                                    :harmful-duplication-delta 1
+                                    :case-matrix-delta 0
+                                    :helper-hidden-delta 0}}]
+                     false)]
         (should-contain "where:" output)
-        (should-contain "worst-examples:" output)
-        (should-contain "how:" output))))
+        (should-contain "worst-examples:" output))))
+
+  (it "renders action sections in guidance reports"
+    (with-redefs [scrap.guidance/guidance (fn [_]
+                                            report-guidance-result)
+                scrap.guidance/pressure-level (fn [_] "HIGH")
+                scrap.guidance/ratio (fn [n d] (if (pos? d) (/ n d) 0.0))]
+      (let [output (report/render-report
+                     [{:path "spec/a_spec.clj"
+                       :summary rich-summary
+                       :comparison {:verdict :worse
+                                    :file-score-delta 2.0
+                                    :avg-scrap-delta 1.0
+                                    :max-scrap-delta 2
+                                    :harmful-duplication-delta 1
+                                    :case-matrix-delta 0
+                                    :helper-hidden-delta 0}}]
+                     false)]
+        (should-contain "how:" output)
+        (should-contain "HIGH: Strengthen assertions first." output))))
 
   (it "renders summary helper sections"
     (let [why-output (report-summary/guidance-why-section rich-summary)
@@ -380,43 +456,25 @@
       (should-contain "branching-examples: 2/6" verbose-output)
       (should-contain "avg-arrange-similarity: 0.20" verbose-output)))
 
-  (it "renders verbose reports and json payloads"
+  (it "renders verbose report diagnostics"
     (let [output (report/render-report
                    [{:path "spec/b_spec.clj"
-                     :comparison {:verdict :mixed
-                                  :file-score-delta -1.0
-                                  :avg-scrap-delta -1.0
-                                  :max-scrap-delta -1
-                                  :harmful-duplication-delta 0
-                                  :case-matrix-delta 0
-                                  :helper-hidden-delta 0}
+                     :comparison report-comparison
                      :structure-errors ["bad nesting"]
                      :parse-error "parse failed"
                      :summary rich-summary
                      :blocks [{:path ["suite"]
                                :summary rich-summary
                                :worst-example {:name "slow case" :scrap 20}}]
-                     :examples [{:describe-path ["suite"]
-                                 :name "slow case"
-                                 :scrap 20
-                                 :complexity 6
-                                 :complexity-score 7.5
-                                 :line-count 12
-                                 :raw-line-count 14
-                                 :assertions 1
-                                 :branches 2
-                                 :setup-depth 3
-                                 :with-redefs 1
-                                 :helper-calls 2
-                                 :helper-hidden-lines 3
-                                 :table-driven? false
-                                 :smells ["multiple-phases"]}]}]
-                   true)
-          json-output (report/render-json ["spec/b_spec.clj"] [{:path "spec/b_spec.clj"}])]
+                     :examples [report-example]}]
+                   true)]
       (should-contain "structure-errors:" output)
       (should-contain "parse-error: parse failed" output)
       (should-contain "blocks:" output)
-      (should-contain "SCRAP: 20.0" output)
+      (should-contain "SCRAP: 20.0" output)))
+
+  (it "renders json payloads"
+    (let [json-output (report/render-json ["spec/b_spec.clj"] [{:path "spec/b_spec.clj"}])]
       (should-contain "\"baseline-version\"" json-output))))
 
 (describe "scan"

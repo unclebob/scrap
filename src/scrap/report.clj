@@ -2,8 +2,8 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [scrap.guidance :as guidance]
-            [scrap.report-summary :as report-summary]
-            [scrap.shared :as shared]))
+            [scrap.report-model :as report-model]
+            [scrap.report-summary :as report-summary]))
 
 (defn- round1
   [n]
@@ -174,10 +174,7 @@
 
 (defn render-json
   [paths reports]
-  (json/write-str
-    {:baseline-version shared/baseline-version
-     :paths (vec paths)
-     :reports reports}))
+  (json/write-str (report-model/baseline-document paths reports)))
 
 ;; clj-mutate-manifest-begin
 ;; {:version 1, :tested-at "2026-03-16T09:22:41.568368-05:00", :module-hash "1165194229", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 6, :hash "980190637"} {:id "defn-/round1", :kind "defn-", :line 8, :end-line 10, :hash "991386479"} {:id "defn-/format-smells", :kind "defn-", :line 12, :end-line 16, :hash "-1571160262"} {:id "defn-/render-comparison", :kind "defn-", :line 18, :end-line 30, :hash "1317457391"} {:id "defn-/render-top-block", :kind "defn-", :line 32, :end-line 44, :hash "-2093400885"} {:id "defn-/guidance-where-section", :kind "defn-", :line 46, :end-line 51, :hash "814006351"} {:id "defn-/render-top-example", :kind "defn-", :line 53, :end-line 59, :hash "-604010348"} {:id "defn-/guidance-worst-section", :kind "defn-", :line 61, :end-line 66, :hash "-869739732"} {:id "defn-/guidance-how-section", :kind "defn-", :line 68, :end-line 73, :hash "-2046202976"} {:id "defn-/render-guidance-report", :kind "defn-", :line 75, :end-line 96, :hash "-1700682112"} {:id "defn-/render-verbose-block", :kind "defn-", :line 98, :end-line 108, :hash "-1870139994"} {:id "defn-/verbose-blocks-section", :kind "defn-", :line 110, :end-line 114, :hash "-1125870309"} {:id "defn-/render-verbose-example", :kind "defn-", :line 116, :end-line 132, :hash "276516332"} {:id "defn-/verbose-examples-section", :kind "defn-", :line 134, :end-line 138, :hash "-2016491541"} {:id "defn-/render-file-report", :kind "defn-", :line 140, :end-line 152, :hash "-1793687341"} {:id "defn/render-report", :kind "defn", :line 154, :end-line 173, :hash "331681477"} {:id "defn/render-json", :kind "defn", :line 175, :end-line 180, :hash "-1763666260"}]}

@@ -2,6 +2,57 @@
   (:require [scrap.core :as scrap]
             [speclj.core :refer :all]))
 
+(def complex-workflow-source
+  (str "(describe \"workflow\"\n"
+       "  (defn helper [] 42)\n"
+       "  (before (helper))\n"
+       "  (it \"does a lot\"\n"
+       "    (with-redefs [foo inc] (helper))\n"
+       "    (with-redefs [bar dec] (helper))\n"
+       "    (with-redefs [baz identity] (helper))\n"
+       "    (with-redefs [qux str]\n"
+       "      (let [data {:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :h 8 :i 9 :j 10 :k 11}\n"
+       "            result (if true (helper) 0)]\n"
+       "        result))\n"
+       "    (should= 42 (helper))\n"
+       "    (helper)\n"
+       "    (should= 42 (helper))))\n"))
+
+(def report-fixture
+  {:path "spec/foo_spec.clj"
+   :structure-errors ["ERROR line 2: (it) inside (it) at line 1"]
+   :parse-error nil
+   :examples [{:describe-path ["math"]
+               :name "adds"
+               :scrap 9
+               :raw-line-count 4
+               :line-count 4
+               :assertions 1
+               :branches 0
+               :setup-depth 0
+               :with-redefs 0
+               :helper-calls 0
+               :helper-hidden-lines 0
+               :smells []}]
+   :blocks [{:path ["math"]
+             :summary {:avg-scrap 9.0
+                       :max-scrap 9
+                       :example-count 1
+                       :duplication-score 0}
+             :worst-example {:name "adds"
+                             :scrap 9}}]
+   :summary {:avg-scrap 9.0
+             :max-scrap 9
+             :example-count 1
+             :branching-examples 0
+             :low-assertion-examples 1
+             :zero-assertion-examples 0
+             :with-redefs-examples 0
+             :coverage-matrix-candidates 0
+             :duplication-score 0
+             :harmful-duplication-score 0
+             :effective-duplication-score 0}})
+
 (describe "scan-structure"
   (it "reports nested it forms"
     (let [errors (scrap/scan-structure
@@ -27,27 +78,20 @@
       (should= ["math"] (-> report :blocks first :path))
       (should= 1 (-> report :blocks first :summary :example-count))))
 
-  (it "scores complex examples higher and reports smells"
-    (let [report (scrap/analyze-source
-                   (str "(describe \"workflow\"\n"
-                        "  (defn helper [] 42)\n"
-                        "  (before (helper))\n"
-                        "  (it \"does a lot\"\n"
-                        "    (with-redefs [foo inc] (helper))\n"
-                        "    (with-redefs [bar dec] (helper))\n"
-                        "    (with-redefs [baz identity] (helper))\n"
-                        "    (with-redefs [qux str]\n"
-                        "      (let [data {:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :h 8 :i 9 :j 10 :k 11}\n"
-                        "            result (if true (helper) 0)]\n"
-                        "        result))\n"
-                        "    (should= 42 (helper))\n"
-                        "    (helper)\n"
-                        "    (should= 42 (helper))))\n")
-                   "spec/workflow_spec.clj")
+  (it "scores complex workflow examples above the hotspot threshold"
+    (let [report (scrap/analyze-source complex-workflow-source "spec/workflow_spec.clj")
           example (first (:examples report))]
-      (should (< 20 (:scrap example)))
+      (should (< 20 (:scrap example)))))
+
+  (it "reports multiple phases and mocking smells in complex workflow examples"
+    (let [report (scrap/analyze-source complex-workflow-source "spec/workflow_spec.clj")
+          example (first (:examples report))]
       (should-contain "multiple-phases" (:smells example))
-      (should-contain "high-mocking" (:smells example))
+      (should-contain "high-mocking" (:smells example))))
+
+  (it "reports literal-heavy setup smells in complex workflow examples"
+    (let [report (scrap/analyze-source complex-workflow-source "spec/workflow_spec.clj")
+          example (first (:examples report))]
       (should-contain "literal-heavy-setup" (:smells example))))
 
   (it "records parse errors while preserving structure errors"
@@ -230,128 +274,59 @@
 
 (describe "collect-spec-files"
   (it "collects spec files from a directory tree"
-    (let [root (java.nio.file.Files/createTempDirectory "scrap-specs" (make-array java.nio.file.attribute.FileAttribute 0))
-          nested (.resolve root "nested")
-          target (.resolve nested "example_spec.clj")
-          ignored (.resolve nested "notes.txt")]
-      (java.nio.file.Files/createDirectories nested (make-array java.nio.file.attribute.FileAttribute 0))
-      (spit (.toFile target) "(describe \"x\")")
-      (spit (.toFile ignored) "ignore")
-      (let [files (scrap/collect-spec-files [(.toString root)])]
-        (should= [(.toString target)] files)))))
+    (let [root (java.io.File. "target/scrap/spec-tree")
+          nested (java.io.File. root "nested")
+          target (java.io.File. nested "example_spec.clj")
+          ignored (java.io.File. nested "notes.txt")]
+      (.mkdirs nested)
+      (spit target "(describe \"x\")")
+      (spit ignored "ignore")
+      (let [files (scrap/collect-spec-files [(.getPath root)])]
+        (should= [(.getPath target)] files))
+      (.delete ignored)
+      (.delete target)
+      (.delete nested)
+      (.delete root))))
 
 (describe "render-report"
   (it "renders guidance by default"
-    (let [output (scrap/render-report
-                   [{:path "spec/foo_spec.clj"
-                     :structure-errors ["ERROR line 2: (it) inside (it) at line 1"]
-                     :parse-error nil
-                     :examples [{:describe-path ["math"]
-                                 :name "adds"
-                                 :scrap 9
-                                 :line-count 4
-                                 :assertions 1
-                                 :branches 0
-                                 :setup-depth 0
-                                 :with-redefs 0
-                                 :helper-calls 0
-                                 :smells []}]
-                     :blocks [{:path ["math"]
-                               :summary {:avg-scrap 9.0
-                                         :max-scrap 9
-                                         :example-count 1
-                                         :duplication-score 0}
-                               :worst-example {:name "adds"
-                                               :scrap 9}}]
-                     :summary {:avg-scrap 9.0
-                               :max-scrap 9
-                               :example-count 1
-                               :branching-examples 0
-                               :low-assertion-examples 1
-                               :with-redefs-examples 0}}]
-                   false)]
+    (let [output (scrap/render-report [report-fixture] false)]
       (should-contain "SCRAP Report" output)
       (should-contain "refactor-pressure:" output)
       (should-contain "ai-actionability:" output)
-      (should-contain "why:" output)
+      (should-contain "why:" output)))
+
+  (it "renders summary sections in default report mode"
+    (let [output (scrap/render-report [report-fixture] false)]
       (should-contain "where:" output)
       (should-contain "how:" output)
       (should-contain "coverage-matrix-candidates:" output)
       (should-contain "HIGH:" output)
-      (should-contain "Worst Examples" output)
+      (should-contain "Worst Examples" output)))
+
+  (it "renders example names in default report mode"
+    (let [output (scrap/render-report [report-fixture] false)]
       (should-contain "math / adds" output)))
 
   (it "includes full metrics in verbose mode"
-    (let [output (scrap/render-report
-                   [{:path "spec/foo_spec.clj"
-                     :structure-errors ["ERROR line 2: (it) inside (it) at line 1"]
-                     :parse-error nil
-                     :examples [{:describe-path ["math"]
-                                 :name "adds"
-                                 :scrap 9
-                                 :line-count 4
-                                 :assertions 1
-                                 :branches 0
-                                 :setup-depth 0
-                                 :with-redefs 0
-                                 :helper-calls 0
-                                 :smells []}]
-                     :blocks [{:path ["math"]
-                               :summary {:avg-scrap 9.0
-                                         :max-scrap 9
-                                         :example-count 1
-                                         :duplication-score 0}
-                               :worst-example {:name "adds"
-                                               :scrap 9}}]
-                     :summary {:avg-scrap 9.0
-                               :max-scrap 9
-                               :example-count 1
-                               :branching-examples 0
-                               :low-assertion-examples 1
-                               :with-redefs-examples 0}}]
-                   true)]
+    (let [output (scrap/render-report [report-fixture] true)]
       (should-contain "structure-errors" output)
       (should-contain "blocks:" output)
       (should-contain "avg-scrap:" output)
       (should-contain "duplication-score:" output)
       (should-contain "coverage-matrix-candidates:" output))))
 
-  (it "renders comparison details when a baseline is attached"
+  (it "renders a comparison section when a baseline is attached"
     (let [output (scrap/render-report
-                   [{:path "spec/foo_spec.clj"
-                     :structure-errors []
-                     :parse-error nil
-                     :examples [{:describe-path ["math"]
-                                 :name "adds"
-                                 :scrap 9
-                                 :raw-line-count 4
-                                 :line-count 4
-                                 :assertions 1
-                                 :branches 0
-                                 :setup-depth 0
-                                 :with-redefs 0
-                                 :helper-calls 0
-                                 :helper-hidden-lines 0
-                                 :smells []}]
-                     :blocks []
-                     :summary {:avg-scrap 9.0
-                               :max-scrap 9
-                               :example-count 1
-                               :branching-examples 0
-                               :low-assertion-examples 1
-                               :zero-assertion-examples 0
-                               :with-redefs-examples 0
-                               :coverage-matrix-candidates 0
-                               :duplication-score 0
-                               :harmful-duplication-score 0
-                               :effective-duplication-score 0}
-                     :comparison {:verdict :worse
-                                  :file-score-delta 5.0
-                                  :avg-scrap-delta 1.0
-                                  :max-scrap-delta 2
-                                  :harmful-duplication-delta 1
-                                  :case-matrix-delta 0
-                                  :helper-hidden-delta 1}}]
+                   [(assoc report-fixture
+                           :structure-errors []
+                           :comparison {:verdict :worse
+                                        :file-score-delta 5.0
+                                        :avg-scrap-delta 1.0
+                                        :max-scrap-delta 2
+                                        :harmful-duplication-delta 1
+                                        :case-matrix-delta 0
+                                        :helper-hidden-delta 1})]
                    false)]
       (should-contain "comparison:" output)
       (should-contain "verdict: worse" output)

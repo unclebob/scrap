@@ -1,40 +1,47 @@
 (ns scrap.pressure-score
-  (:require [scrap.pressure-stability :as stability]))
+  (:require [scrap.policy :as policy]
+            [scrap.pressure-stability :as stability]))
 
 (defn- size-factor
   [summary]
   (let [example-count (or (:example-count summary) 0)]
-    (cond
-      (<= example-count 1) 0.25
-      (<= example-count 2) 0.40
-      (<= example-count 4) 0.65
-      :else 1.0)))
+    (:factor (first (filter #(or (nil? (:up-to %))
+                                 (<= example-count (:up-to %)))
+                            (:size-factors policy/pressure))))))
 
 (defn- score-terms
   [summary example-count]
-  [(* 1.2 (or (:avg-scrap summary) 0))
-   (* 0.6 (or (:max-scrap summary) 0))
-   (* 0.8 (or (:effective-duplication-score summary) 0))
-   (* 20 (stability/ratio (or (:low-assertion-examples summary) 0) example-count))
-   (* 15 (stability/ratio (or (:branching-examples summary) 0) example-count))
-   (* 15 (stability/ratio (or (:with-redefs-examples summary) 0) example-count))
-   (* 12 (stability/ratio (or (:helper-hidden-example-count summary) 0) example-count))])
+  (let [{:keys [avg-scrap
+                max-scrap
+                effective-duplication-score
+                low-assertion-ratio
+                branching-ratio
+                with-redefs-ratio
+                helper-hidden-ratio]} (:weights policy/pressure)]
+    [(* avg-scrap (or (:avg-scrap summary) 0))
+     (* max-scrap (or (:max-scrap summary) 0))
+     (* effective-duplication-score (or (:effective-duplication-score summary) 0))
+     (* low-assertion-ratio (stability/ratio (or (:low-assertion-examples summary) 0) example-count))
+     (* branching-ratio (stability/ratio (or (:branching-examples summary) 0) example-count))
+     (* with-redefs-ratio (stability/ratio (or (:with-redefs-examples summary) 0) example-count))
+     (* helper-hidden-ratio (stability/ratio (or (:helper-hidden-example-count summary) 0) example-count))]))
 
 (defn refactor-pressure-score
   [summary]
   (let [example-count (or (:example-count summary) 0)
         base (reduce + (score-terms summary example-count))
-        matrix-credit (* 1.5 (or (:case-matrix-repetition summary) 0))]
+        matrix-credit (* (:matrix-credit policy/pressure) (or (:case-matrix-repetition summary) 0))]
     (max 0 (- (* (size-factor summary) base) matrix-credit))))
 
 (defn pressure-level
   [summary]
-  (let [score (refactor-pressure-score summary)]
+  (let [score (refactor-pressure-score summary)
+        {:keys [critical high medium]} (:levels policy/pressure)]
     (cond
       (stability/stable-summary? summary) "STABLE"
-      (>= score 55) "CRITICAL"
-      (>= score 35) "HIGH"
-      (>= score 18) "MEDIUM"
+      (>= score critical) "CRITICAL"
+      (>= score high) "HIGH"
+      (>= score medium) "MEDIUM"
       :else "LOW")))
 
 ;; clj-mutate-manifest-begin

@@ -1,6 +1,6 @@
 (ns scrap.report-summary
   (:require [clojure.string :as str]
-            [scrap.guidance :as guidance]))
+            [scrap.judgment :as judgment]))
 
 (defn render-summary-lines
   [lines indent]
@@ -52,12 +52,10 @@
 
 (defn summary-ratio-lines
   [summary]
-  [["low-assertion-ratio" (format "%.2f" (double (guidance/ratio (or (:low-assertion-examples summary) 0)
-                                                                (or (:example-count summary) 0))))]
-   ["branching-ratio" (format "%.2f" (double (guidance/ratio (or (:branching-examples summary) 0)
-                                                            (or (:example-count summary) 0))))]
-   ["mocking-ratio" (format "%.2f" (double (guidance/ratio (or (:with-redefs-examples summary) 0)
-                                                          (or (:example-count summary) 0))))]])
+  (let [{:keys [low-assertion-ratio branching-ratio mocking-ratio]} (judgment/summary-ratios summary)]
+    [["low-assertion-ratio" (format "%.2f" (double low-assertion-ratio))]
+     ["branching-ratio" (format "%.2f" (double branching-ratio))]
+     ["mocking-ratio" (format "%.2f" (double mocking-ratio))]]))
 
 (defn guidance-why-section
   [summary]

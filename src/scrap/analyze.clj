@@ -1,6 +1,7 @@
 (ns scrap.analyze
   (:require [scrap.source :as source]))
 
+;; Stable analysis facade for callers that should not depend on source internals.
 (def analyze-source source/analyze-source)
 (def analyze-file source/analyze-file)
 (def collect-spec-files source/collect-spec-files)

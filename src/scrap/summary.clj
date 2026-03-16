@@ -1,7 +1,12 @@
 (ns scrap.summary
   (:require [clojure.set :as set]
             [clojure.string :as str]
-            [scrap.shared :as shared]))
+            [scrap.policy :as policy]
+            [scrap.report-model :as report-model]))
+
+(defn- duplication-threshold
+  []
+  (:threshold policy/duplication))
 
 (defn- jaccard-similarity
   [a b]
@@ -20,7 +25,7 @@
       (fn [example]
         (let [features (key-fn example)]
           (and (seq features)
-               (some #(>= (jaccard-similarity features (key-fn %)) shared/duplication-threshold)
+               (some #(>= (jaccard-similarity features (key-fn %)) (duplication-threshold))
                      (remove #{example} examples)))))
       examples)))
 
@@ -39,24 +44,33 @@
 
 (defn- coverage-matrix-candidate?
   [example]
-  (and (<= (:scrap example) 18)
-       (<= (:line-count example) 12)
-       (<= (:assertions example) 1)
-       (<= (:branches example) 0)
-       (<= (:setup-depth example) 2)
-       (<= (:with-redefs example) 0)
-       (<= (or (:temp-resources example) 0) 0)
-       (<= (or (:helper-hidden-lines example) 0) 0)
-       (or (:table-driven? example)
-           (and (<= (count (:subject-symbols example)) 2)
-                (or (seq (:assert-features example))
-                    (seq (:arrange-features example)))))))
+  (let [{:keys [matrix-max-scrap
+                matrix-max-lines
+                matrix-max-assertions
+                matrix-max-branches
+                matrix-max-setup-depth
+                matrix-max-with-redefs
+                matrix-max-temp-resources
+                matrix-max-helper-hidden-lines
+                matrix-max-subject-symbols]} policy/duplication]
+    (and (<= (:scrap example) matrix-max-scrap)
+         (<= (:line-count example) matrix-max-lines)
+         (<= (:assertions example) matrix-max-assertions)
+         (<= (:branches example) matrix-max-branches)
+         (<= (:setup-depth example) matrix-max-setup-depth)
+         (<= (:with-redefs example) matrix-max-with-redefs)
+         (<= (or (:temp-resources example) 0) matrix-max-temp-resources)
+         (<= (or (:helper-hidden-lines example) 0) matrix-max-helper-hidden-lines)
+         (or (:table-driven? example)
+             (and (<= (count (:subject-symbols example)) matrix-max-subject-symbols)
+                  (or (seq (:assert-features example))
+                      (seq (:arrange-features example))))))))
 
 (defn- similar-to-any?
   [example examples key-fn]
   (let [features (key-fn example)]
     (and (seq features)
-         (some #(>= (jaccard-similarity features (key-fn %)) shared/duplication-threshold)
+         (some #(>= (jaccard-similarity features (key-fn %)) (duplication-threshold))
                (remove #{example} examples)))))
 
 (defn- coverage-matrix-count
@@ -137,7 +151,8 @@
       {:case-matrix-repetition coverage-matrix-candidates
        :coverage-matrix-candidates coverage-matrix-candidates
        :effective-duplication-score (max 0 (- (:harmful-duplication-score duplication)
-                                              (quot coverage-matrix-candidates 2)))})))
+                                              (quot coverage-matrix-candidates
+                                                    (:coverage-credit-divisor policy/duplication))))})))
 
 (defn summarize-blocks
   [examples]
@@ -145,9 +160,10 @@
        (group-by :describe-path)
        (remove (fn [[path _]] (empty? path)))
        (map (fn [[path block-examples]]
-              {:path path
-               :summary (summarize-examples block-examples)
-               :worst-example (first (sort-by :scrap > block-examples))}))
+              (report-model/block-report
+                {:path path
+                 :summary (summarize-examples block-examples)
+                 :worst-example (first (sort-by :scrap > block-examples))})))
        (sort-by (fn [{:keys [path]}]
                   [(count path) (str/join " / " path)]))
        vec))

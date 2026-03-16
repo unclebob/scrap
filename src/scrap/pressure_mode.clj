@@ -1,28 +1,35 @@
 (ns scrap.pressure-mode
-  (:require [scrap.pressure-score :as score]
+  (:require [scrap.policy :as policy]
+            [scrap.pressure-score :as score]
             [scrap.pressure-stability :as stability]))
 
 (defn- split-pressure?
   [summary]
-  (let [avg-scrap (or (:avg-scrap summary) 0)
+  (let [{split-avg-scrap :avg-scrap
+         split-duplication :effective-duplication-score
+         split-subject-repetition :subject-repetition-score} (:split policy/pressure)
+        avg-scrap (or (:avg-scrap summary) 0)
         harmful-duplication (or (:effective-duplication-score summary) 0)
         subject-repetition (or (:subject-repetition-score summary) 0)
         helper-hidden (or (:helper-hidden-example-count summary) 0)]
-    (or (>= avg-scrap 10)
-        (>= harmful-duplication 20)
-        (>= subject-repetition 12)
+    (or (>= avg-scrap split-avg-scrap)
+        (>= harmful-duplication split-duplication)
+        (>= subject-repetition split-subject-repetition)
         (pos? helper-hidden))))
 
 (defn remediation-mode
   [summary blocks]
-  (let [example-count (or (:example-count summary) 0)
+  (let [{split-example-count :example-count
+         split-high-pressure-blocks :high-pressure-blocks
+         split-max-scrap :max-scrap} (:split policy/pressure)
+        example-count (or (:example-count summary) 0)
         high-pressure-blocks (count (filter #(contains? #{"HIGH" "CRITICAL"} (score/pressure-level (:summary %))) blocks))]
     (cond
       (stability/stable-summary? summary) "STABLE"
       (and (not (stability/stable-summary? summary))
-           (>= example-count 12)
-           (or (>= high-pressure-blocks 2)
-               (>= (or (:max-scrap summary) 0) 35))
+           (>= example-count split-example-count)
+           (or (>= high-pressure-blocks split-high-pressure-blocks)
+               (>= (or (:max-scrap summary) 0) split-max-scrap))
            (split-pressure? summary))
       "SPLIT"
       :else "LOCAL")))

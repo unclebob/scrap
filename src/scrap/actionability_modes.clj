@@ -1,28 +1,40 @@
 (ns scrap.actionability-modes
-  (:require [scrap.pressure :as pressure]))
+  (:require [scrap.judgment :as judgment]
+            [scrap.policy :as policy]
+            [scrap.pressure :as pressure]))
 
 (defn- matrix-heavy?
   [summary max-scrap branching-ratio mocking-ratio]
-  (let [coverage-matrix-candidates (or (:coverage-matrix-candidates summary) 0)
+  (let [{min-case-matrix-repetition :min-case-matrix-repetition
+         effective-duplication-divisor :effective-duplication-divisor
+         matrix-max-scrap :max-scrap
+         max-branching-ratio :max-branching-ratio
+         max-mocking-ratio :max-mocking-ratio} (:matrix policy/actionability)
+        coverage-matrix-candidates (or (:coverage-matrix-candidates summary) 0)
         case-matrix-repetition (or (:case-matrix-repetition summary) 0)
         harmful-duplication (or (:effective-duplication-score summary) 0)]
     (and (pos? coverage-matrix-candidates)
-         (>= case-matrix-repetition (max 2 (quot harmful-duplication 3)))
-         (<= max-scrap 12)
-         (<= branching-ratio 0.15)
-         (< mocking-ratio 0.2))))
+         (>= case-matrix-repetition (max min-case-matrix-repetition
+                                         (quot harmful-duplication effective-duplication-divisor)))
+         (<= max-scrap matrix-max-scrap)
+         (<= branching-ratio max-branching-ratio)
+         (< mocking-ratio max-mocking-ratio))))
 
 (defn- local-safe?
   [mode summary zero-assertion-ratio low-assertion-ratio branching-ratio mocking-ratio]
-  (let [harmful-duplication (or (:effective-duplication-score summary) 0)
+  (let [{local-low-assertion-ratio :low-assertion-ratio
+         local-max-branching-ratio :max-branching-ratio
+         local-max-mocking-ratio :max-mocking-ratio
+         local-max-scrap :max-scrap} (:local policy/actionability)
+        harmful-duplication (or (:effective-duplication-score summary) 0)
         max-scrap (or (:max-scrap summary) 0)]
     (and (= mode "LOCAL")
          (or (> harmful-duplication 0)
              (> zero-assertion-ratio 0.0)
-             (> low-assertion-ratio 0.4)
-             (> max-scrap 20))
-         (<= branching-ratio 0.3)
-         (< mocking-ratio 0.35))))
+             (> low-assertion-ratio local-low-assertion-ratio)
+             (> max-scrap local-max-scrap))
+         (<= branching-ratio local-max-branching-ratio)
+         (< mocking-ratio local-max-mocking-ratio))))
 
 (defn- stable-action
   [mode]
@@ -51,12 +63,9 @@
 (defn ai-actionability
   [summary blocks]
   (let [mode (pressure/remediation-mode summary blocks)
-        example-count (or (:example-count summary) 0)
         max-scrap (or (:max-scrap summary) 0)
-        low-assertion-ratio (pressure/ratio (or (:low-assertion-examples summary) 0) example-count)
-        zero-assertion-ratio (pressure/ratio (or (:zero-assertion-examples summary) 0) example-count)
-        branching-ratio (pressure/ratio (or (:branching-examples summary) 0) example-count)
-        mocking-ratio (pressure/ratio (or (:with-redefs-examples summary) 0) example-count)]
+        {:keys [low-assertion-ratio zero-assertion-ratio branching-ratio mocking-ratio]}
+        (judgment/summary-ratios summary)]
     (or (stable-action mode)
         (matrix-action summary max-scrap branching-ratio mocking-ratio)
         (local-action mode summary zero-assertion-ratio low-assertion-ratio branching-ratio mocking-ratio)

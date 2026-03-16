@@ -1,16 +1,17 @@
 (ns scrap.example-metrics
   (:require [scrap.example-node :as node]
-            [scrap.shared :as shared]))
+            [scrap.policy :as policy]))
 
 (defn saturating-complexity-score
   [complexity]
-  (if (<= complexity 1)
-    shared/trivial-complexity-floor
-    (+ shared/trivial-complexity-floor
-       (* (- shared/complexity-cap shared/trivial-complexity-floor)
-          (- 1.0
-             (Math/exp (- (* shared/complexity-rise-rate
-                             (double (dec complexity))))))))))
+  (let [{:keys [cap rise-rate floor]} policy/complexity]
+    (if (<= complexity 1)
+      floor
+      (+ floor
+         (* (- cap floor)
+            (- 1.0
+               (Math/exp (- (* rise-rate
+                               (double (dec complexity)))))))))))
 
 (defn api-contract-example?
   [metrics line-count phases]

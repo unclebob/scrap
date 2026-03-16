@@ -3,6 +3,7 @@
             [scrap.comparison :as comparison]
             [scrap.pressure :as pressure]))
 
+;; Stable judgment facade for callers that should not depend on scoring internals.
 (def ratio pressure/ratio)
 (def stable-summary? pressure/stable-summary?)
 (def refactor-pressure-score pressure/refactor-pressure-score)
