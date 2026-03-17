@@ -32,6 +32,8 @@
     {:name name
      :describe-path describe-path
      :line (or (-> it-form meta :line) 1)
+     :end-line (or (-> it-form meta :end-line)
+                   (+ (or (-> it-form meta :line) 1) (dec raw-lines)))
      :line-count line-count
      :raw-line-count raw-lines
      :assertions (:assertions metrics)

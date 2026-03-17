@@ -1,6 +1,7 @@
 (ns scrap.summary
   (:require [clojure.set :as set]
             [clojure.string :as str]
+            [scrap.extraction-pressure :as extraction-pressure]
             [scrap.policy :as policy]
             [scrap.report-model :as report-model]))
 
@@ -131,6 +132,7 @@
                     0.0)
         duplication (summarize-duplication examples)
         coverage-matrix-candidates (coverage-matrix-count examples)
+        extraction-summary (extraction-pressure/summarize-extractions examples)
         helper-hidden-example-count (count (filter #(pos? (:helper-hidden-lines %)) examples))
         zero-assertion-examples (count (filter #(zero? (:assertions %)) examples))
         table-driven-examples (count (filter :table-driven? examples))]
@@ -148,11 +150,10 @@
        :table-driven-examples table-driven-examples
        :coverage-matrix-candidates coverage-matrix-candidates}
       duplication
+      extraction-summary
       {:case-matrix-repetition coverage-matrix-candidates
        :coverage-matrix-candidates coverage-matrix-candidates
-       :effective-duplication-score (max 0 (- (:harmful-duplication-score duplication)
-                                              (quot coverage-matrix-candidates
-                                                    (:coverage-credit-divisor policy/duplication))))})))
+       :effective-duplication-score (:extraction-pressure-score extraction-summary 0.0)})))
 
 (defn summarize-blocks
   [examples]
@@ -169,5 +170,5 @@
        vec))
 
 ;; clj-mutate-manifest-begin
-;; {:version 1, :tested-at "2026-03-16T14:35:23.125242-05:00", :module-hash "-972542483", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 5, :hash "39263326"} {:id "defn-/duplication-threshold", :kind "defn-", :line 7, :end-line 9, :hash "-1191465136"} {:id "defn-/jaccard-similarity", :kind "defn-", :line 11, :end-line 19, :hash "716462559"} {:id "defn-/similar-example-count", :kind "defn-", :line 21, :end-line 30, :hash "-439090514"} {:id "defn-/average-similarity", :kind "defn-", :line 32, :end-line 39, :hash "111179513"} {:id "defn-/distinct-shape-count", :kind "defn-", :line 41, :end-line 43, :hash "-237489396"} {:id "defn-/coverage-matrix-candidate?", :kind "defn-", :line 45, :end-line 67, :hash "1218566993"} {:id "defn-/similar-to-any?", :kind "defn-", :line 69, :end-line 74, :hash "459111276"} {:id "defn-/coverage-matrix-count", :kind "defn-", :line 76, :end-line 86, :hash "770069941"} {:id "defn-/summarize-duplication", :kind "defn-", :line 88, :end-line 124, :hash "1875043843"} {:id "defn/summarize-examples", :kind "defn", :line 126, :end-line 155, :hash "-1119063341"} {:id "defn/summarize-blocks", :kind "defn", :line 157, :end-line 169, :hash "-1017107151"}]}
+;; {:version 1, :tested-at "2026-03-16T14:57:39.263039-05:00", :module-hash "-972542483", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 5, :hash "39263326"} {:id "defn-/duplication-threshold", :kind "defn-", :line 7, :end-line 9, :hash "-1191465136"} {:id "defn-/jaccard-similarity", :kind "defn-", :line 11, :end-line 19, :hash "716462559"} {:id "defn-/similar-example-count", :kind "defn-", :line 21, :end-line 30, :hash "-439090514"} {:id "defn-/average-similarity", :kind "defn-", :line 32, :end-line 39, :hash "111179513"} {:id "defn-/distinct-shape-count", :kind "defn-", :line 41, :end-line 43, :hash "-237489396"} {:id "defn-/coverage-matrix-candidate?", :kind "defn-", :line 45, :end-line 67, :hash "1218566993"} {:id "defn-/similar-to-any?", :kind "defn-", :line 69, :end-line 74, :hash "459111276"} {:id "defn-/coverage-matrix-count", :kind "defn-", :line 76, :end-line 86, :hash "770069941"} {:id "defn-/summarize-duplication", :kind "defn-", :line 88, :end-line 124, :hash "1875043843"} {:id "defn/summarize-examples", :kind "defn", :line 126, :end-line 155, :hash "-1119063341"} {:id "defn/summarize-blocks", :kind "defn", :line 157, :end-line 169, :hash "-1017107151"}]}
 ;; clj-mutate-manifest-end

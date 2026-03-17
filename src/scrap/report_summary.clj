@@ -16,6 +16,8 @@
 (def why-line-specs
   [{:label "avg-scrap" :formatter #(format "%.1f" (double (or % 0.0))) :value-fn :avg-scrap}
    {:label "max-scrap" :key :max-scrap :default 0}
+   {:label "recommended-extraction-count" :key :recommended-extraction-count :default 0}
+   {:label "extraction-pressure-score" :formatter #(format "%.1f" (double (or % 0.0))) :value-fn :extraction-pressure-score}
    {:label "harmful-duplication-score" :key :harmful-duplication-score :default 0}
    {:label "effective-duplication-score" :key :effective-duplication-score :default 0}
    {:label "coverage-matrix-candidates" :key :coverage-matrix-candidates :default 0}
@@ -30,6 +32,8 @@
    {:label "low-assertion-examples" :value-fn #(str (:low-assertion-examples %) "/" (:example-count %))}
    {:label "zero-assertion-examples" :value-fn #(str (:zero-assertion-examples %) "/" (:example-count %))}
    {:label "with-redefs-examples" :value-fn #(str (:with-redefs-examples %) "/" (:example-count %))}
+   {:label "recommended-extraction-count" :key :recommended-extraction-count :default 0}
+   {:label "extraction-pressure-score" :formatter #(format "%.1f" (double (or % 0.0))) :value-fn :extraction-pressure-score}
    {:label "duplication-score" :key :duplication-score :default 0}
    {:label "harmful-duplication-score" :key :harmful-duplication-score :default 0}
    {:label "effective-duplication-score" :key :effective-duplication-score :default 0}
@@ -76,5 +80,5 @@
          "\n")))
 
 ;; clj-mutate-manifest-begin
-;; {:version 1, :tested-at "2026-03-16T14:34:21.017989-05:00", :module-hash "1083835785", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "2041167502"} {:id "defn/render-summary-lines", :kind "defn", :line 5, :end-line 7, :hash "-305372540"} {:id "defn-/metric-line", :kind "defn-", :line 9, :end-line 14, :hash "2112396391"} {:id "def/why-line-specs", :kind "def", :line 16, :end-line 24, :hash "-1269627151"} {:id "def/verbose-line-specs", :kind "def", :line 26, :end-line 47, :hash "273677513"} {:id "defn-/metric-lines", :kind "defn-", :line 49, :end-line 51, :hash "-1786652267"} {:id "defn/summary-ratio-lines", :kind "defn", :line 53, :end-line 58, :hash "-1956866886"} {:id "defn/guidance-why-section", :kind "defn", :line 60, :end-line 66, :hash "1114220517"} {:id "defn/verbose-summary-lines", :kind "defn", :line 68, :end-line 70, :hash "-1625042628"} {:id "defn/verbose-summary-section", :kind "defn", :line 72, :end-line 76, :hash "925045547"}]}
+;; {:version 1, :tested-at "2026-03-16T14:54:44.752983-05:00", :module-hash "1083835785", :forms [{:id "form/0/ns", :kind "ns", :line 1, :end-line 3, :hash "2041167502"} {:id "defn/render-summary-lines", :kind "defn", :line 5, :end-line 7, :hash "-305372540"} {:id "defn-/metric-line", :kind "defn-", :line 9, :end-line 14, :hash "2112396391"} {:id "def/why-line-specs", :kind "def", :line 16, :end-line 24, :hash "-1269627151"} {:id "def/verbose-line-specs", :kind "def", :line 26, :end-line 47, :hash "273677513"} {:id "defn-/metric-lines", :kind "defn-", :line 49, :end-line 51, :hash "-1786652267"} {:id "defn/summary-ratio-lines", :kind "defn", :line 53, :end-line 58, :hash "-1956866886"} {:id "defn/guidance-why-section", :kind "defn", :line 60, :end-line 66, :hash "1114220517"} {:id "defn/verbose-summary-lines", :kind "defn", :line 68, :end-line 70, :hash "-1625042628"} {:id "defn/verbose-summary-section", :kind "defn", :line 72, :end-line 76, :hash "925045547"}]}
 ;; clj-mutate-manifest-end

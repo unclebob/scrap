@@ -125,6 +125,44 @@
       (should (< 0.0 (:avg-arrange-similarity summary)))
       (should (< 0.0 (:duplication-score summary))))))
 
+  (it "recommends extractions only when repeated harmful structure has net benefit"
+    (let [report (scrap/analyze-source
+                   (str "(describe \"helpers\"\n"
+                        "  (before (reset! state []))\n"
+                        "  (it \"first\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"second\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"third\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"fourth\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"fifth\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result))))\n")
+                   "spec/helpers_spec.clj")
+          summary (:summary report)
+          recommendation (first (:recommended-extractions summary))]
+      (should= 1 (:recommended-extraction-count summary))
+      (should (< 0.0 (:extraction-pressure-score summary)))
+      (should= ["first" "second" "third" "fourth" "fifth"] (:it-names recommendation))
+      (should= 3 (:line-start recommendation))
+      (should (< (:line-start recommendation) (:line-end recommendation)))))
+
   (it "classifies repeated low-complexity examples as coverage-matrix candidates"
     (let [report (scrap/analyze-source
                    (str "(describe \"matrix\"\n"
@@ -158,6 +196,41 @@
           output (scrap/render-report [report] false)]
       (should-contain "ai-actionability: AUTO_TABLE_DRIVE" output)
       (should-contain "Safe to table-drive automatically" output)))
+
+  (it "renders recommended extractions with it names and line ranges"
+    (let [report (scrap/analyze-source
+                   (str "(describe \"helpers\"\n"
+                        "  (before (reset! state []))\n"
+                        "  (it \"first\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"second\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"third\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"fourth\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result)))\n"
+                        "  (it \"fifth\"\n"
+                        "    (let [result (service/run :ok)]\n"
+                        "      (audit/log :ok result)\n"
+                        "      (should= :ok result)\n"
+                        "      (should-not= nil result))))\n")
+                   "spec/helpers_spec.clj")
+          output (scrap/render-report [report] false)]
+      (should-contain "recommended-extractions:" output)
+      (should-contain "first, second, third, fourth, fifth" output)
+      (should-contain "line 3" output)))
 
   (it "charges helper-hidden complexity back to examples that call spec-local helpers"
     (let [report (scrap/analyze-source
