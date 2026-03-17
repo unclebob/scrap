@@ -2,7 +2,7 @@
 
 SCRAP is a structural quality analyzer for Speclj specs.
 
-It is aimed at test code in the same way CRAP is aimed at production code. SCRAP does not use mutation results. It measures structural complexity, weak-spec smells, and structural duplication.
+It is aimed at test code in the same way CRAP is aimed at production code. SCRAP does not use mutation results. It measures structural complexity, weak-spec smells, and the net pressure to extract duplicated test scaffolding.
 
 Its overall goal is to guide an AI assistant in whether, where, and how to refactor a poorly structured spec file.
 
@@ -83,7 +83,8 @@ Per `describe` or `context` block:
 - example count
 - average SCRAP
 - max SCRAP
-- duplication score
+- recommended extraction count
+- extraction pressure score
 - worst example
 
 Per spec file:
@@ -96,6 +97,8 @@ Per spec file:
 - zero-assertion example count
 - `with-redefs` example count
 - helper-hidden example count
+- recommended extraction count
+- extraction pressure score
 - duplication score
 - harmful duplication score
 - effective duplication score
@@ -128,13 +131,25 @@ That means comments and whitespace do not matter, and examples can still match w
 - literal values differ
 - setup or arrange scaffolding is structurally similar but not textually identical
 
-SCRAP compares normalized feature sets with Jaccard similarity and treats examples as duplicated when similarity is at least `0.5`.
+SCRAP compares normalized feature sets with Jaccard similarity and treats examples as related when similarity is at least `0.5`.
 
 It now splits repetition into separate channels:
 
 - harmful duplication: repeated setup, assertion, fixture, or arrange scaffolding
 - case-matrix repetition: repeated low-complexity examples that are likely coverage tables, even when they are written as many small sibling examples rather than one explicit loop
 - subject repetition: repeated focus on the same production API, which is often fine and is not heavily penalized
+
+SCRAP does not add raw duplication directly into the file score anymore. Instead, it turns fuzzy duplication matches into extraction candidates, estimates whether helper extraction would pay off, and only charges the positive net benefit:
+
+- `F`: shared structural forms across a duplicate cluster
+- `I`: number of repeated examples in the cluster
+- `V`: variable points in the cluster
+- `D_before = 0` when `F <= 3` or `V > 4`
+- otherwise `D_before = (max(0, F - 3) * (I - 1)^1.5) / (V + 1)`
+- helper cost is estimated from shared and variable structure
+- extraction pressure is `max(0, D_before - D_after - H)`, with `D_after` currently treated as `0`
+
+That means small repetitions, highly variable repetitions, and likely coverage matrices can still be visible in the diagnostics without increasing SCRAP pressure.
 
 SCRAP’s complexity score now uses a saturating curve rather than quadratic growth. That means:
 
@@ -151,6 +166,7 @@ By default, SCRAP reports guidance for an AI assistant:
 - where the pressure is concentrated
 - how to refactor it
 - the worst examples in the file
+- specific extraction recommendations with `it` names and line ranges when helper extraction appears net beneficial
 
 With `--verbose`, SCRAP reports the full metric set:
 
@@ -168,6 +184,7 @@ With `--compare`, SCRAP attaches comparison data to each file report:
 - verdict: `improved`, `worse`, `mixed`, or `unchanged`
 - file-score delta
 - average/max SCRAP deltas
+- extraction-pressure delta
 - harmful duplication delta
 - case-matrix delta
 - helper-hidden delta
@@ -176,8 +193,10 @@ If a refactor made the file structurally worse, the text report says so explicit
 
 SCRAP distinguishes between:
 
-- harmful duplication: repeated setup, fixture, or arrange scaffolding that should usually be extracted or split
+- harmful duplication: repeated setup, fixture, or arrange scaffolding detected structurally
 - coverage-matrix repetition: many small, low-complexity examples with similar structure that are often better converted into table-driven checks
+
+Only some harmful duplication becomes extraction pressure. The cutoff is intentional: a repeated fragment should only raise SCRAP when extracting it is likely to improve the tests after accounting for helper cost.
 
 SCRAP also tracks helper-hidden complexity. If an example gets shorter only because setup moved into a spec-local helper, the helper body is still charged back to the example. That prevents helper extraction from looking like an automatic improvement.
 
@@ -189,7 +208,7 @@ The intended use is to find:
 - weakly asserted examples
 - logic-heavy examples
 - mocking-heavy examples
-- repeated setup or arrange scaffolding
+- repeated setup or arrange scaffolding that is actually worth extracting
 - spec files or describe blocks that should be split
 
 In practice, SCRAP is meant to answer three refactoring questions for an AI assistant:
@@ -208,8 +227,9 @@ When SCRAP reports `coverage-matrix-candidates`, the intended interpretation for
 
 When SCRAP reports high `effective-duplication-score`, the intended interpretation is different:
 
-- repeated scaffolding is dominating the file or block
-- extract setup, extract helpers, or split the block/file
+- there are one or more duplicate clusters whose extraction appears net beneficial
+- inspect the reported `it` names and line ranges first
+- extract setup, extract helpers, or split the block/file only for those clusters
 
 Recommendation lines are ranked by confidence:
 
@@ -270,5 +290,7 @@ The intended workflow is:
 2. Refactor the spec
 3. Run `clj -M:scrap spec/path --compare target/scrap/...`
 4. If the verdict is `worse`, inspect the helper-hidden and harmful-duplication deltas before keeping the refactor
+
+If `extraction-pressure-delta` went up, the refactor likely introduced or preserved duplication that still looks worth extracting under the current heuristic.
 
 In both cases, the recommendation is advisory. The assistant should inspect the file and decide whether the recommendation fits the real testing intent before changing code.
